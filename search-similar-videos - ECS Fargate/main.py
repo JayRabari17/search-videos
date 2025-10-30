@@ -1,13 +1,18 @@
 from fastapi import FastAPI, HTTPException
-from mangum import Mangum
 import json
 import boto3
 import os
+import logging
 from opensearchpy import OpenSearch, RequestsHttpConnection, AWSV4SignerAuth
 from typing import List, Dict, Optional
 from pydantic import BaseModel
+import uvicorn
 
-app = FastAPI()
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="Video Search Service", version="1.0.0")
 
 
 class SearchRequest(BaseModel):
@@ -38,6 +43,12 @@ class SearchResponse(BaseModel):
     clips: List[Dict]
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for ECS task"""
+    return {"status": "healthy", "service": "video-search"}
+
+
 @app.post("/search", response_model=SearchResponse)
 async def search_videos(request: SearchRequest):
     """
@@ -53,7 +64,7 @@ async def search_videos(request: SearchRequest):
         if not query_text:
             raise HTTPException(status_code=400, detail="query_text is required")
         
-        print(f"Searching for: '{query_text}' (type: {search_type}, top_k: {top_k})")
+        logger.info(f"Searching for: '{query_text}' (type: {search_type}, top_k: {top_k})")
         
         # Initialize clients
         opensearch_client = get_opensearch_client()
@@ -66,7 +77,7 @@ async def search_videos(request: SearchRequest):
         if not query_embedding:
             raise HTTPException(status_code=500, detail="Failed to generate query embedding")
         
-        print(f"Generated embedding with {len(query_embedding)} dimensions")
+        logger.info(f"Generated embedding with {len(query_embedding)} dimensions")
         
         # Perform search based on type
         if search_type == 'hybrid':
@@ -81,7 +92,7 @@ async def search_videos(request: SearchRequest):
         # Convert S3 paths to presigned URLs
         results = convert_s3_to_presigned_urls(s3_client, results)
         
-        print(f"Found {len(results)} results")
+        logger.info(f"Found {len(results)} results")
         
         return SearchResponse(
             query=query_text,
@@ -93,9 +104,7 @@ async def search_videos(request: SearchRequest):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Error in search: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in search: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -117,11 +126,11 @@ async def list_all_videos():
         for video in videos:
             # Generate presigned URL for private S3 bucket access
             presigned_url = convert_s3_to_presigned_url(s3_client, video['video_path'])
-            
+
             video_list.append(VideoMetadata(
                 video_id=video['video_id'],
                 video_path=presigned_url if presigned_url else video['video_path'],
-                title=video.get('title') or f"Video {video['video_id'][:8]}",
+                title=video.get('clip_text') or f"Video {video['video_id'][:8]}",
                 thumbnail_url=video.get('thumbnail_url'),
                 duration=video.get('duration'),
                 upload_date=video.get('upload_date'),
@@ -134,15 +143,16 @@ async def list_all_videos():
         )
     
     except Exception as e:
-        print(f"Error in list_videos: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error in list_videos: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 def get_opensearch_client():
     """Initialize OpenSearch Cluster client"""
-    opensearch_host = os.environ['OPENSEARCH_CLUSTER_HOST']
+    opensearch_host = os.environ.get('OPENSEARCH_CLUSTER_HOST')
+    if not opensearch_host:
+        raise ValueError("OPENSEARCH_CLUSTER_HOST environment variable not set")
+    
     opensearch_host = opensearch_host.replace('https://', '').replace('http://', '').strip()
     
     session = boto3.Session()
@@ -184,7 +194,7 @@ def generate_text_embedding(bedrock_runtime, text: str) -> List[float]:
         return []
         
     except Exception as e:
-        print(f"Error generating text embedding: {e}")
+        logger.error(f"Error generating text embedding: {e}", exc_info=True)
         return []
 
 
@@ -208,7 +218,7 @@ def convert_s3_to_presigned_urls(s3_client, results: List[Dict], expiration: int
                 result['video_path'] = presigned_url
                 
             except Exception as e:
-                print(f"Error generating presigned URL for {video_path}: {e}")
+                logger.warning(f"Error generating presigned URL for {video_path}: {e}")
                 pass
     
     return results
@@ -233,7 +243,7 @@ def convert_s3_to_presigned_url(s3_client, video_path: str, expiration: int = 36
         return presigned_url
         
     except Exception as e:
-        print(f"Error generating presigned URL for {video_path}: {e}")
+        logger.warning(f"Error generating presigned URL for {video_path}: {e}")
         return None
 
 
@@ -251,7 +261,7 @@ def get_all_unique_videos(client) -> List[Dict]:
                     "video_metadata": {
                         "top_hits": {
                             "size": 1,
-                            "_source": ["video_id", "video_path", "title", "thumbnail_url", "duration", "upload_date"]
+                            "_source": ["video_id", "video_path", "clip_text"]
                         }
                     },
                     "clip_count": {
@@ -276,7 +286,7 @@ def get_all_unique_videos(client) -> List[Dict]:
         return videos
         
     except Exception as e:
-        print(f"Error fetching unique videos: {e}")
+        logger.error(f"Error fetching unique videos: {e}", exc_info=True)
         return []
 
 
@@ -291,7 +301,7 @@ def hybrid_search(client, query_embedding: List[float], query_text: str, top_k: 
                         "knn": {
                             "embedding": {
                                 "vector": query_embedding,
-                                "k": top_k * 2
+                                "k": top_k
                             }
                         }
                     },
@@ -332,7 +342,7 @@ def hybrid_search(client, query_embedding: List[float], query_text: str, top_k: 
         return parse_search_results(response)
         
     except Exception as e:
-        print(f"Hybrid search error: {e}")
+        logger.error(f"Hybrid search error: {e}", exc_info=True)
         return vector_search(client, query_embedding, top_k)
 
 
@@ -371,6 +381,9 @@ def text_search(client, query_text: str, top_k: int = 10) -> List[Dict]:
                 }
             }
         },
+        "collapse": {
+            "field": "clip_id"
+        },
         "_source": ["video_id", "video_path", "clip_id", "timestamp_start", 
                    "timestamp_end", "clip_text", "embedding_scope"]
     }
@@ -404,16 +417,16 @@ def _create_hybrid_search_pipeline(client):
     try:
         try:
             client.search_pipeline.get(id="hybrid-norm-pipeline")
-            print("Hybrid search pipeline already exists")
+            logger.info("Hybrid search pipeline already exists")
         except:
             client.search_pipeline.put(
                 id="hybrid-norm-pipeline",
                 body=pipeline_body
             )
-            print("✓ Created hybrid search pipeline with min-max normalization")
+            logger.info("✓ Created hybrid search pipeline with min-max normalization")
     
     except Exception as e:
-        print(f"✗ Pipeline creation error: {e}")
+        logger.warning(f"✗ Pipeline creation error: {e}")
         return False
     
     return True
@@ -432,4 +445,11 @@ def parse_search_results(response: Dict) -> List[Dict]:
     return results
 
 
-lambda_handler = Mangum(app)
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port,
+        log_level="info"
+    )
