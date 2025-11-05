@@ -142,7 +142,7 @@ class OpenSearchConsolidator:
                             "engine": "lucene",
                             "parameters": {
                                 "ef_construction": 256,
-                                "m": 32
+                                "m": 16
                             }
                         }
                     },
@@ -155,7 +155,7 @@ class OpenSearchConsolidator:
                             "engine": "lucene",
                             "parameters": {
                                 "ef_construction": 256,
-                                "m": 32
+                                "m": 16
                             }
                         }
                     },
@@ -168,7 +168,7 @@ class OpenSearchConsolidator:
                             "engine": "lucene",
                             "parameters": {
                                 "ef_construction": 256,
-                                "m": 32
+                                "m": 16
                             }
                         }
                     }

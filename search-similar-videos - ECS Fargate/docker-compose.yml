@@ -1,8 +1,6 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: search-similar-videos:latest
     container_name: search-similar-videos
     ports:
       - "8000:8000"

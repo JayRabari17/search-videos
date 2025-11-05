@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Video Search Service", version="1.0.0")
 
+INDEX_NAME = "video_clips_cosine_sim"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://condenast-fe.s3-website-us-east-1.amazonaws.com"],  # Add your frontend URLs
@@ -283,7 +285,7 @@ def get_all_unique_videos(client) -> List[Dict]:
     }
     
     try:
-        response = client.search(index="video_clips_cosine_sim", body=search_body)
+        response = client.search(index=INDEX_NAME, body=search_body)
         
         videos = []
         for bucket in response['aggregations']['unique_videos']['buckets']:
@@ -335,13 +337,13 @@ def hybrid_search(client, query_embedding: List[float], query_text: str, top_k: 
     
     if pipeline_exists:
         search_params = {
-            "index": "video_clips_cosine_sim",
+            "index": INDEX_NAME,
             "body": search_body,
             "search_pipeline": "hybrid-norm-pipeline"
         }
     else:
         search_params = {
-            "index": "video_clips_cosine_sim",
+            "index": INDEX_NAME,
             "body": search_body
         }
     
@@ -373,7 +375,7 @@ def vector_search(client, query_embedding: List[float], top_k: int = 10) -> List
                    "timestamp_end", "clip_text", "embedding_scope"]
     }
     
-    response = client.search(index="video_clips_cosine_sim", body=search_body)
+    response = client.search(index=INDEX_NAME, body=search_body)
     return parse_search_results(response)
 
 
@@ -396,7 +398,7 @@ def text_search(client, query_text: str, top_k: int = 10) -> List[Dict]:
                    "timestamp_end", "clip_text", "embedding_scope"]
     }
     
-    response = client.search(index="video_clips_cosine_sim", body=search_body)
+    response = client.search(index=INDEX_NAME, body=search_body)
     return parse_search_results(response)
 
 

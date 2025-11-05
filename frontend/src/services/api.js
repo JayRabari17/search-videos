@@ -28,7 +28,7 @@ const api = axios.create({
 // New searchClips using API Gateway endpoint
 export const searchClips = async (query, topK = 10) => {
   try {
-    const response = await fetch(`${BACKEND_ALB_URL}/search`, {
+    const response = await fetch(`${API_BASE_URL}/search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -36,7 +36,7 @@ export const searchClips = async (query, topK = 10) => {
       body: JSON.stringify({
         query_text: query,
         top_k: topK,
-        search_type: "vector"
+        search_type: "hybrid"
       }),
     });
     
