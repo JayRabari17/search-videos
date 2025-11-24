@@ -25,21 +25,14 @@ const SearchBarMarengo3 = ({ onSearch, isLoading, onSearchTypeChange, queryValue
 
   // Determine search type based on selections
   const getSearchType = () => {
-    // If all three are selected, use vector (combines all with weights 0.5, 0.3, 0.2)
-    if (visual && audio && transcription) return 'vector';
-    // If only visual
+    // Single modality selections
     if (visual && !audio && !transcription) return 'visual';
-    // If only audio
     if (!visual && audio && !transcription) return 'audio';
-    // If only transcription
     if (!visual && !audio && transcription) return 'transcription';
-    // If visual + audio (weights 0.6, 0.4)
-    if (visual && audio && !transcription) return 'vector_visual_audio';
-    // If visual + transcription (weights 0.6, 0.4)
-    if (visual && !audio && transcription) return 'vector_visual_transcription';
-    // If audio + transcription (weights 0.5, 0.5)
-    if (!visual && audio && transcription) return 'vector_audio_transcription';
-    return 'vector'; // default
+    
+    // Any combination (including all three) → 'vector'
+    // Backend will use intent classification to determine modality focus
+    return 'vector'; // default for any multi-modality combination
   };
 
   const handle_submit = async (e) => {
@@ -226,7 +219,7 @@ const SearchBarMarengo3 = ({ onSearch, isLoading, onSearchTypeChange, queryValue
         <button
           type="submit"
           disabled={isLoading || (!query.trim() && !selectedImage)}
-          className="flex items-center justify-center w-14 h-14 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-2xl transition-colors shadow-sm hover:shadow-md disabled:cursor-not-allowed flex-shrink-0"
+          className="flex items-center justify-center w-14 h-14 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 text-white rounded-2xl transition-colors shadow-sm hover:shadow-md disabled:cursor-not-allowed flex-shrink-0"
           title="Search"
         >
           {isLoading ? (
@@ -241,7 +234,7 @@ const SearchBarMarengo3 = ({ onSearch, isLoading, onSearchTypeChange, queryValue
           <button
             type="button"
             onClick={() => setShowDropdown(!showDropdown)}
-            className="flex items-center gap-2 px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-2xl border border-gray-200 transition-colors"
+            className="flex items-center gap-2 px-3 py-4 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-2xl border border-gray-200 transition-colors"
             disabled={isLoading}
             title="Search options"
           >

@@ -255,18 +255,20 @@ export const searchClipsTranscriptionMarengo3 = async (query, topK = 10, imageFi
   return searchClipsMarengo3(query, topK, 'transcription', imageFile);
 };
 
-// Vector search type combinations for Marengo 3
-export const searchClipsVectorVisualAudioMarengo3 = async (query, topK = 10, imageFile = null) => {
-  return searchClipsMarengo3(query, topK, 'vector_visual_audio', imageFile);
-};
-
-export const searchClipsVectorVisualTranscriptionMarengo3 = async (query, topK = 10, imageFile = null) => {
-  return searchClipsMarengo3(query, topK, 'vector_visual_transcription', imageFile);
-};
-
-export const searchClipsVectorAudioTranscriptionMarengo3 = async (query, topK = 10, imageFile = null) => {
-  return searchClipsMarengo3(query, topK, 'vector_audio_transcription', imageFile);
-};
+// # COMMENTED OUT: Vector search type combinations replaced by intent classification
+// # Frontend now only sends: 'vector', 'visual', 'audio', 'transcription'
+// # Backend uses intent classification when 'vector' is received
+// export const searchClipsVectorVisualAudioMarengo3 = async (query, topK = 10, imageFile = null) => {
+//   return searchClipsMarengo3(query, topK, 'vector_visual_audio', imageFile);
+// };
+//
+// export const searchClipsVectorVisualTranscriptionMarengo3 = async (query, topK = 10, imageFile = null) => {
+//   return searchClipsMarengo3(query, topK, 'vector_visual_transcription', imageFile);
+// };
+//
+// export const searchClipsVectorAudioTranscriptionMarengo3 = async (query, topK = 10, imageFile = null) => {
+//   return searchClipsMarengo3(query, topK, 'vector_audio_transcription', imageFile);
+// };
 
 
 export const listAllVideos = async () => {

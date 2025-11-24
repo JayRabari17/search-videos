@@ -152,7 +152,7 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
       </nav>
 
       {/* User Profile - Bottom */}
-      <div className="px-4 pt-4 border-t border-blue-100">
+      <div className="px-4 pt-4 border-blue-100">
         <div className={`flex items-center gap-3 p-3 transition-all cursor-pointer ${
           isExpanded ? 'rounded-lg hover:bg-blue-50' : 'rounded-full hover:bg-blue-50 justify-center'
         }`}>
