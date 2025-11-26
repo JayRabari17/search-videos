@@ -17,13 +17,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(name=__name__)
 
 
 app = FastAPI(title="Video Search Service", version="1.0.0")
 
 app.add_middleware(
-    CORSMiddleware,
+    middleware_class=CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://condenast-fe.s3-website-us-east-1.amazonaws.com",
@@ -50,9 +50,9 @@ VECTOR_PIPELINE_3_BALANCED = "vector-norm-pipeline-video-clips-3-balanced-intent
 
 # Intent-to-weights mapping for RRF pipeline (visual, audio, transcription)
 INTENT_WEIGHTS = {
-    "VISUAL":   [0.8, 0.1, 0.1],   # visual-focused
-    "AUDIO":    [0.1, 0.7, 0.2],   # audio-focused
-    "TRANSCRIPT": [0.1, 0.2, 0.7], # text-focused
+    "VISUAL":   [1.0, 0.0, 0.0],   # visual-focused
+    "AUDIO":    [0.05, 0.8, 0.15],   # audio-focused
+    "TRANSCRIPT": [0.05, 0.15, 0.8], # text-focused
     "BALANCED": [0.34, 0.33, 0.33] # balanced across all
 }
 
