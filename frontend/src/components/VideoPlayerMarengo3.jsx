@@ -251,7 +251,7 @@ const VideoPlayerMarengo3 = ({ clip, allClips, onClose, onClipSelect }) => {
           <div 
             className={`absolute inset-0 flex flex-col justify-end pointer-events-none transition-opacity duration-300 ${showControls ? 'opacity-100' : 'opacity-0'}`}
           >
-            <div className="w-full bg-gradient-to-t from-black/90 via-black/60 to-transparent px-4 pb-4 pt-10 pointer-events-auto mb-8">
+            <div className="w-full bg-gradient-to-t from-black/90 via-black/60 to-transparent px-4 pb-4 pt-10 pointer-events-auto">
               {/* Timeline (Top of Control Bar) */}
               <div className="w-full flex items-center gap-3 mb-1">
                 <span className="text-[10px] font-mono text-gray-300 min-w-[35px] text-right">

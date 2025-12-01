@@ -1,4 +1,3 @@
-import math
 from fastapi import FastAPI, HTTPException
 import json
 import boto3
@@ -8,6 +7,7 @@ import base64
 import uuid
 import datetime
 import asyncio
+import math
 from opensearchpy import OpenSearch, RequestsHttpConnection, AWSV4SignerAuth
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel
@@ -53,6 +53,21 @@ VECTOR_PIPELINE_3_VISUAL_AUDIO = "vector-norm-pipeline-video-clips-3-visual-audi
 VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION = "vector-norm-pipeline-video-clips-3-visual-transcription-rrf"
 VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION = "vector-norm-pipeline-video-clips-3-audio-transcription-rrf"
 
+# Visual_Audio combination pipelines with focus variants
+VECTOR_PIPELINE_3_VISUAL_AUDIO_VISUAL_FOCUS = "vector-norm-pipeline-video-clips-3-visual-audio-visual-focus-rrf"
+VECTOR_PIPELINE_3_VISUAL_AUDIO_AUDIO_FOCUS = "vector-norm-pipeline-video-clips-3-visual-audio-audio-focus-rrf"
+VECTOR_PIPELINE_3_VISUAL_AUDIO_BALANCED = "vector-norm-pipeline-video-clips-3-visual-audio-balanced-rrf"
+
+# Visual_Transcription combination pipelines with focus variants
+VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION_VISUAL_FOCUS = "vector-norm-pipeline-video-clips-3-visual-transcription-visual-focus-rrf"
+VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION_TEXT_FOCUS = "vector-norm-pipeline-video-clips-3-visual-transcription-text-focus-rrf"
+VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION_BALANCED = "vector-norm-pipeline-video-clips-3-visual-transcription-balanced-rrf"
+
+# Audio_Transcription combination pipelines with focus variants
+VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION_AUDIO_FOCUS = "vector-norm-pipeline-video-clips-3-audio-transcription-audio-focus-rrf"
+VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION_TEXT_FOCUS = "vector-norm-pipeline-video-clips-3-audio-transcription-text-focus-rrf"
+VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION_BALANCED = "vector-norm-pipeline-video-clips-3-audio-transcription-balanced-rrf"
+
 # Intent-to-weights mapping for RRF pipeline (visual, audio, transcription)
 INTENT_WEIGHTS = {
     "VISUAL":   [0.8, 0.1, 0.1],   # visual-focused
@@ -63,13 +78,70 @@ INTENT_WEIGHTS = {
 
 # Combination weights for RRF pipeline (for 2-modality searches)
 COMBINATION_WEIGHTS = {
-    "VISUAL_AUDIO": [0.6, 0.4],  # visual + audio
-    "VISUAL_TRANSCRIPTION": [0.6, 0.4],  # visual + transcription
-    "AUDIO_TRANSCRIPTION": [0.5, 0.5]  # audio + transcription
+    # Visual_Audio weights: [visual, audio]
+    "VISUAL_AUDIO_VISUAL_FOCUS": [0.96, 0.04],
+    "VISUAL_AUDIO_AUDIO_FOCUS": [0.2, 0.8],
+    "VISUAL_AUDIO_BALANCED": [0.5, 0.5],
+    
+    # Visual_Transcription weights: [visual, transcription]
+    "VISUAL_TRANSCRIPTION_VISUAL_FOCUS": [0.95, 0.05],
+    "VISUAL_TRANSCRIPTION_TEXT_FOCUS": [0.05, 0.95],
+    "VISUAL_TRANSCRIPTION_BALANCED": [0.5, 0.5],
+    
+    # Audio_Transcription weights: [audio, transcription]
+    "AUDIO_TRANSCRIPTION_AUDIO_FOCUS": [0.95, 0.05],
+    "AUDIO_TRANSCRIPTION_TEXT_FOCUS": [0.05, 0.95],
+    "AUDIO_TRANSCRIPTION_BALANCED": [0.5, 0.5],
 }
 
+# Modality preference keywords for combination searches (including all verb tenses)
+VISUAL_KEYWORDS = [
+    # Base forms
+    "look", "see", "watch", "appear", "show", "display", "view", "scene", 
+    "color", "bright", "dark", "visible", "visual", "image", "picture",
+    "frame", "shot", "angle", "perspective", "background", "foreground",
+    # Continuous tenses
+    "looking", "seeing", "watching", "appearing", "showing", "displaying", "viewing",
+    # Past tenses
+    "looked", "saw", "watched", "appeared", "showed", "displayed", "viewed",
+    # Past participles
+    "seen", "shown",
+
+    "drinking"
+]
+
+AUDIO_KEYWORDS = [
+    # Base forms
+    "sound", "hear", "listen", "audio", "music", "song", "voice", "speak",
+    "talk", "say", "noise", "loud", "quiet", "volume", "tone", "pitch",
+    "melody", "rhythm", "beat", "acoustic", "sonic",
+    # Continuous tenses
+    "hearing", "listening", "speaking", "talking", "saying", "sounding",
+    # Past tenses
+    "heard", "listened", "spoke", "talked", "said", "sounded",
+    # Past participles
+    "spoken",
+
+    "screaming"
+]
+
+TEXT_KEYWORDS = [
+    # Base forms
+    "say", "said", "mention", "word", "phrase", "quote", "text", "transcript",
+    "speak", "talk", "dialogue", "conversation", "discuss", "explain",
+    "describe", "tell", "narrate", "caption", "subtitle",
+    # Continuous tenses
+    "saying", "mentioning", "speaking", "talking", "discussing", "explaining",
+    "describing", "telling", "narrating",
+    # Past tenses
+    "mentioned", "discussed", "explained", "described", "told", "narrated",
+    # Past participles
+    "spoken", "mentioned", "discussed", "explained", "described", "told", "narrated"
+]
+
+
 # Initialize clients at startup
-opensearch_client = None
+opensearch_client: OpenSearch
 bedrock_runtime = None
 s3_client = None
 vector_pipeline_exists = False
@@ -94,12 +166,12 @@ async def startup_event():
         _create_vector_search_pipeline_3_vector(opensearch_client)
 
         # # Create intent-based pipelines for Marengo 3
-        logger.info("Creating intent-based search pipelines...")
-        _create_intent_based_pipelines(opensearch_client)
+        # logger.info("Creating intent-based search pipelines...")
+        # _create_intent_based_pipelines(opensearch_client)
 
         # Create combination pipelines for Marengo 3 (7 search options)
-        # logger.info("Creating combination search pipelines for Marengo 3...")
-        # _create_combination_pipelines(opensearch_client)
+        logger.info("Creating combination search pipelines for Marengo 3...")
+        _create_combination_pipelines(opensearch_client)
 
         # logger.info("Configuring S3 CORS policy...")
         # _configure_s3_cors(s3_client)
@@ -330,47 +402,47 @@ async def search_videos_marengo3(request: SearchRequest):
         query_embedding = None
 
         # COMMENTED OUT: Intent classification temporarily disabled
-        if query_text and not image_base64 and search_type == "vector":
-            # For text-only vector search: Run BOTH intent classification and embedding generation in parallel
-            logger.info(
-                "📊 Step 1 & 2: Running intent classification and embedding generation concurrently..."
-            )
+        # if query_text and not image_base64 and search_type == "vector":
+        #     # For text-only vector search: Run BOTH intent classification and embedding generation in parallel
+        #     logger.info(
+        #         "📊 Step 1 & 2: Running intent classification and embedding generation concurrently..."
+        #     )
 
-            # Create both tasks
-            intent_task = classify_query_intent(bedrock_runtime, query_text)
-            embedding_task = asyncio.to_thread(
-                generate_embedding_marengo3,
-                bedrock_runtime,
-                text=query_text,
-                image_base64=image_base64,
-            )
+        #     # Create both tasks
+        #     intent_task = classify_query_intent(bedrock_runtime, query_text)
+        #     embedding_task = asyncio.to_thread(
+        #         generate_embedding_marengo3,
+        #         bedrock_runtime,
+        #         text=query_text,
+        #         image_base64=image_base64,
+        #     )
 
-            # Run both concurrently and wait for both to complete
-            classified_intent, query_embedding = await asyncio.gather(
-                intent_task, embedding_task
-            )
+        #     # Run both concurrently and wait for both to complete
+        #     classified_intent, query_embedding = await asyncio.gather(
+        #         intent_task, embedding_task
+        #     )
 
-            logger.info(f"✓ Intent classification result: {classified_intent}")
-            logger.info(
-                f"✓ Generated {search_input_type} embedding (Marengo 3) with {len(query_embedding) if query_embedding else 0} dimensions"
-            )
+        #     logger.info(f"✓ Intent classification result: {classified_intent}")
+        #     logger.info(
+        #         f"✓ Generated {search_input_type} embedding (Marengo 3) with {len(query_embedding) if query_embedding else 0} dimensions"
+        #     )
 
-            # Map intent to search type
-            intent_based_search_type = get_search_type_from_intent(classified_intent)
-            logger.info(
-                f"📊 Mapped intent '{classified_intent}' to search_type: '{intent_based_search_type}'"
-            )
-        else:
-            # For other cases (image, multimodal, or direct modality search): Only generate embedding
-            logger.info(
-                f"📊 Step 2: Generating {search_input_type} embedding using Marengo 3"
-            )
-            query_embedding = generate_embedding_marengo3(
-                bedrock_runtime, text=query_text, image_base64=image_base64
-            )
-            logger.info(
-                f"✓ Generated {search_input_type} embedding (Marengo 3) with {len(query_embedding) if query_embedding else 0} dimensions"
-            )
+        #     # Map intent to search type
+        #     intent_based_search_type = get_search_type_from_intent(classified_intent)
+        #     logger.info(
+        #         f"📊 Mapped intent '{classified_intent}' to search_type: '{intent_based_search_type}'"
+        #     )
+        # else:
+        # For other cases (image, multimodal, or direct modality search): Only generate embedding
+        logger.info(
+            f"� Step 2:  Generating {search_input_type} embedding using Marengo 3"
+        )
+        query_embedding = generate_embedding_marengo3(
+            bedrock_runtime, text=query_text, image_base64=image_base64
+        )
+        logger.info(
+            f"✓ Generated {search_input_type} embedding (Marengo 3) with {len(query_embedding) if query_embedding else 0} dimensions"
+        )
 
         if not query_embedding:
             raise HTTPException(
@@ -390,31 +462,31 @@ async def search_videos_marengo3(request: SearchRequest):
             )
         elif search_type == "vector":
             # COMMENTED OUT: Intent-based vector search temporarily disabled
-            # For vector search, use intent classification if available (text-only queries)
-            if classified_intent:
-                logger.info(
-                    f"📊 Using intent-based vector search with intent: {classified_intent}"
-                )
-                results = vector_search_marengo3_with_intent(
-                    opensearch_client,
-                    query_embedding,
-                    classified_intent,
-                    top_k,
-                    "video_clips_3_lucene",
-                )
-            else:
-                # For image or multimodal queries, use balanced weights
-                logger.info(
-                    "📊 Using balanced vector search (image or multimodal query)"
-                )
-                results = vector_search_marengo3(
-                    opensearch_client, query_embedding, top_k, "video_clips_3_lucene"
-                )
-            # # Using balanced vector search (all 3 modalities)
-            # logger.info("📊 Using balanced vector search (all 3 modalities)")
-            # results = vector_search_marengo3(
-            #     opensearch_client, query_embedding, top_k, "video_clips_3_lucene"
-            # )
+            # # For vector search, use intent classification if available (text-only queries)
+            # if classified_intent:
+            #     logger.info(
+            #         f"📊 Using intent-based vector search with intent: {classified_intent}"
+            #     )
+            #     results = vector_search_marengo3_with_intent(
+            #         opensearch_client,
+            #         query_embedding,
+            #         classified_intent,
+            #         top_k,
+            #         "video_clips_3_lucene",
+            #     )
+            # else:
+            #     # For image or multimodal queries, use balanced weights
+            #     logger.info(
+            #         "📊 Using balanced vector search (image or multimodal query)"
+            #     )
+            #     results = vector_search_marengo3(
+            #         opensearch_client, query_embedding, top_k, "video_clips_3_lucene"
+            #     )
+            # Using balanced vector search (all 3 modalities)
+            logger.info("📊 Using balanced vector search (all 3 modalities)")
+            results = vector_search_marengo3(
+                opensearch_client, query_embedding, top_k, "video_clips_3_lucene"
+            )
         elif search_type == "visual":
             results = visual_search_marengo3(
                 opensearch_client, query_embedding, top_k, "video_clips_3_lucene"
@@ -427,18 +499,18 @@ async def search_videos_marengo3(request: SearchRequest):
             results = transcription_search_marengo3(
                 opensearch_client, query_embedding, top_k, "video_clips_3_lucene"
             )
-        # elif search_type == "visual_audio":
-        #     results = vector_search_visual_audio_marengo3(
-        #         opensearch_client, query_embedding, top_k, "video_clips_3_lucene"
-        #     )
-        # elif search_type == "visual_transcription":
-        #     results = vector_search_visual_transcription_marengo3(
-        #         opensearch_client, query_embedding, top_k, "video_clips_3_lucene"
-        #     )
-        # elif search_type == "audio_transcription":
-        #     results = vector_search_audio_transcription_marengo3(
-        #         opensearch_client, query_embedding, top_k, "video_clips_3_lucene"
-        #     )
+        elif search_type == "visual_audio":
+            results = vector_search_visual_audio_marengo3(
+                opensearch_client, query_embedding, top_k, "video_clips_3_lucene", query_text
+            )
+        elif search_type == "visual_transcription":
+            results = vector_search_visual_transcription_marengo3(
+                opensearch_client, query_embedding, top_k, "video_clips_3_lucene", query_text
+            )
+        elif search_type == "audio_transcription":
+            results = vector_search_audio_transcription_marengo3(
+                opensearch_client, query_embedding, top_k, "video_clips_3_lucene", query_text
+            )
         else:
             raise HTTPException(
                 status_code=400,
@@ -790,6 +862,61 @@ def get_search_type_from_intent(intent: str) -> str:
         "BALANCED": "vector",     # Use all three with balanced weights
     }
     return intent_to_search_type.get(intent, "vector")
+
+
+def detect_modality_preference(query_text: str, combination_type: str) -> str:
+    """
+    Analyze query text to detect modality preference for combination searches.
+    
+    Args:
+        query_text: User's search query
+        combination_type: One of 'visual_audio', 'visual_transcription', 'audio_transcription'
+    
+    Returns:
+        Preference string like 'VISUAL_FOCUS', 'AUDIO_FOCUS', 'TEXT_FOCUS', or 'BALANCED'
+    """
+    if not query_text:
+        return "BALANCED"
+    
+    query_lower = query_text.lower()
+    
+    # Count keyword occurrences
+    visual_count = sum(1 for keyword in VISUAL_KEYWORDS if keyword in query_lower)
+    audio_count = sum(1 for keyword in AUDIO_KEYWORDS if keyword in query_lower)
+    text_count = sum(1 for keyword in TEXT_KEYWORDS if keyword in query_lower)
+    
+    logger.info(f"🔍 Modality keyword counts - Visual: {visual_count}, Audio: {audio_count}, Text: {text_count}")
+    
+    # Determine preference based on combination type
+    if combination_type == "visual_audio":
+        if visual_count > audio_count and visual_count > 0:
+            preference = "VISUAL_FOCUS"
+        elif audio_count > visual_count and audio_count > 0:
+            preference = "AUDIO_FOCUS"
+        else:
+            preference = "BALANCED"
+    
+    elif combination_type == "visual_transcription":
+        if visual_count > text_count and visual_count > 0:
+            preference = "VISUAL_FOCUS"
+        elif text_count > visual_count and text_count > 0:
+            preference = "TEXT_FOCUS"
+        else:
+            preference = "BALANCED"
+    
+    elif combination_type == "audio_transcription":
+        if audio_count > text_count and audio_count > 0:
+            preference = "AUDIO_FOCUS"
+        elif text_count > audio_count and text_count > 0:
+            preference = "TEXT_FOCUS"
+        else:
+            preference = "BALANCED"
+    
+    else:
+        preference = "BALANCED"
+    
+    logger.info(f"✓ Detected modality preference for {combination_type}: {preference}")
+    return preference
 
 
 def generate_embedding_marengo3(
@@ -1531,14 +1658,36 @@ def transcription_search_marengo3(
 
 
 # UNCOMMENTED: Re-enabled 7 search options for Marengo 3 (was using intent classification)
-def vector_search_visual_audio_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3_lucene') -> List[Dict]:
-    """Vector search combining visual and audio embeddings (Marengo 3)"""
+def vector_search_visual_audio_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3_lucene', query_text: str = None) -> List[Dict]:
+    """Vector search combining visual and audio embeddings with modality preference detection (Marengo 3)"""
+    
+    # Detect modality preference from query text
+    preference = detect_modality_preference(query_text or "", "visual_audio")
+    
+    # Map preference to pipeline and weights
+    pipeline_map = {
+        "VISUAL_FOCUS": VECTOR_PIPELINE_3_VISUAL_AUDIO_VISUAL_FOCUS,
+        "AUDIO_FOCUS": VECTOR_PIPELINE_3_VISUAL_AUDIO_AUDIO_FOCUS,
+        "BALANCED": VECTOR_PIPELINE_3_VISUAL_AUDIO_BALANCED
+    }
+    
+    weights_map = {
+        "VISUAL_FOCUS": COMBINATION_WEIGHTS["VISUAL_AUDIO_VISUAL_FOCUS"],
+        "AUDIO_FOCUS": COMBINATION_WEIGHTS["VISUAL_AUDIO_AUDIO_FOCUS"],
+        "BALANCED": COMBINATION_WEIGHTS["VISUAL_AUDIO_BALANCED"]
+    }
+    
+    selected_pipeline = pipeline_map[preference]
+    selected_weights = weights_map[preference]
+    
+    logger.info(f"📊 Using {preference} pipeline for visual_audio search with weights {selected_weights}")
+    
     search_body = {
         "size": TOP_K,
         "query": {
             "hybrid": {
                 "queries": [
-                    # Visual embedding (k-NN) - weight 0.6
+                    # Visual embedding (k-NN)
                     {
                         "knn": {
                             "emb_visual": {
@@ -1547,7 +1696,7 @@ def vector_search_visual_audio_marengo3(client, query_embedding: List[float], to
                             }
                         }
                     },
-                    # Audio embedding (k-NN) - weight 0.4
+                    # Audio embedding (k-NN)
                     {
                         "knn": {
                             "emb_audio": {
@@ -1563,11 +1712,12 @@ def vector_search_visual_audio_marengo3(client, query_embedding: List[float], to
                    "timestamp_end", "clip_text", "thumbnail_path", "video_name", "clip_duration", "video_duration_sec"]
     }
 
+
     if vector_pipeline_exists:
         search_params = {
                 "index": INDEX_NAME,
                 "body": search_body,
-                "search_pipeline": VECTOR_PIPELINE_3_VISUAL_AUDIO  # Using dedicated visual+audio pipeline
+                "search_pipeline": selected_pipeline  # Using preference-based pipeline
             }
     else:
         search_params = {
@@ -1577,16 +1727,37 @@ def vector_search_visual_audio_marengo3(client, query_embedding: List[float], to
 
     try:
         response = client.search(**search_params)
-        logger.info(f"✓ Vector search (visual+audio, Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
-        return parse_search_results_vector(response)
+        logger.info(f"✓ Vector search (visual+audio {preference}, Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        return parse_search_results(response)
     except Exception as e:
         logger.error(f"Vector search (visual+audio, Marengo 3) error: {e}", exc_info=True)
         return []
 
 
 # UNCOMMENTED: Re-enabled 7 search options for Marengo 3 (was using intent classification)
-def vector_search_visual_transcription_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3_lucene') -> List[Dict]:
-    """Vector search combining visual and transcription embeddings (Marengo 3)"""
+def vector_search_visual_transcription_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3_lucene', query_text: str = None) -> List[Dict]:
+    """Vector search combining visual and transcription embeddings with modality preference detection (Marengo 3)"""
+    
+    # Detect modality preference from query text
+    preference = detect_modality_preference(query_text or "", "visual_transcription")
+    
+    # Map preference to pipeline and weights
+    pipeline_map = {
+        "VISUAL_FOCUS": VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION_VISUAL_FOCUS,
+        "TEXT_FOCUS": VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION_TEXT_FOCUS,
+        "BALANCED": VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION_BALANCED
+    }
+    
+    weights_map = {
+        "VISUAL_FOCUS": COMBINATION_WEIGHTS["VISUAL_TRANSCRIPTION_VISUAL_FOCUS"],
+        "TEXT_FOCUS": COMBINATION_WEIGHTS["VISUAL_TRANSCRIPTION_TEXT_FOCUS"],
+        "BALANCED": COMBINATION_WEIGHTS["VISUAL_TRANSCRIPTION_BALANCED"]
+    }
+    
+    selected_pipeline = pipeline_map[preference]
+    selected_weights = weights_map[preference]
+    
+    logger.info(f"📊 Using {preference} pipeline for visual_transcription search with weights {selected_weights}")
     search_body = {
         "size": TOP_K,
         "query": {
@@ -1621,7 +1792,7 @@ def vector_search_visual_transcription_marengo3(client, query_embedding: List[fl
         search_params = {
                 "index": INDEX_NAME,
                 "body": search_body,
-                "search_pipeline": VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION  # Using dedicated visual+transcription pipeline
+                "search_pipeline": selected_pipeline  # Using preference-based pipeline
             }
     else:
         search_params = {
@@ -1631,7 +1802,7 @@ def vector_search_visual_transcription_marengo3(client, query_embedding: List[fl
 
     try:
         response = client.search(**search_params)
-        logger.info(f"✓ Vector search (visual+transcription, Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        logger.info(f"✓ Vector search (visual+transcription {preference}, Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
         return parse_search_results_vector(response)
     except Exception as e:
         logger.error(f"Vector search (visual+transcription, Marengo 3) error: {e}", exc_info=True)
@@ -1639,8 +1810,29 @@ def vector_search_visual_transcription_marengo3(client, query_embedding: List[fl
 
 
 # UNCOMMENTED: Re-enabled 7 search options for Marengo 3 (was using intent classification)
-def vector_search_audio_transcription_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3_lucene') -> List[Dict]:
-    """Vector search combining audio and transcription embeddings (Marengo 3)"""
+def vector_search_audio_transcription_marengo3(client, query_embedding: List[float], top_k: int = 10, INDEX_NAME: str = 'video_clips_3_lucene', query_text: str = None) -> List[Dict]:
+    """Vector search combining audio and transcription embeddings with modality preference detection (Marengo 3)"""
+    
+    # Detect modality preference from query text
+    preference = detect_modality_preference(query_text or "", "audio_transcription")
+    
+    # Map preference to pipeline and weights
+    pipeline_map = {
+        "AUDIO_FOCUS": VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION_AUDIO_FOCUS,
+        "TEXT_FOCUS": VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION_TEXT_FOCUS,
+        "BALANCED": VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION_BALANCED
+    }
+    
+    weights_map = {
+        "AUDIO_FOCUS": COMBINATION_WEIGHTS["AUDIO_TRANSCRIPTION_AUDIO_FOCUS"],
+        "TEXT_FOCUS": COMBINATION_WEIGHTS["AUDIO_TRANSCRIPTION_TEXT_FOCUS"],
+        "BALANCED": COMBINATION_WEIGHTS["AUDIO_TRANSCRIPTION_BALANCED"]
+    }
+    
+    selected_pipeline = pipeline_map[preference]
+    selected_weights = weights_map[preference]
+    
+    logger.info(f"📊 Using {preference} pipeline for audio_transcription search with weights {selected_weights}")
     search_body = {
         "size": TOP_K,
         "query": {
@@ -1675,7 +1867,7 @@ def vector_search_audio_transcription_marengo3(client, query_embedding: List[flo
         search_params = {
                 "index": INDEX_NAME,
                 "body": search_body,
-                "search_pipeline": VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION  # Using dedicated audio+transcription pipeline
+                "search_pipeline": selected_pipeline  # Using preference-based pipeline
             }
     else:
         search_params = {
@@ -1685,7 +1877,7 @@ def vector_search_audio_transcription_marengo3(client, query_embedding: List[flo
 
     try:
         response = client.search(**search_params)
-        logger.info(f"✓ Vector search (audio+transcription, Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
+        logger.info(f"✓ Vector search (audio+transcription {preference}, Marengo 3) completed, found {len(response.get('hits', {}).get('hits', []))} results")
         return parse_search_results_vector(response)
     except Exception as e:
         logger.error(f"Vector search (audio+transcription, Marengo 3) error: {e}", exc_info=True)
@@ -1821,19 +2013,31 @@ def _create_intent_based_pipelines(client):
 
 
 def _create_combination_pipelines(client):
-    """Create combination search pipelines with RRF weights for 2-modality searches (Marengo 3)"""
-
+    """Create combination search pipelines with RRF weights for 2-modality searches (Marengo 3)
+    Creates 9 pipelines total: 3 variants (visual-focus, audio/text-focus, balanced) for each of 3 combinations
+    """
+    
+    # Define all 9 combination pipelines with their weights
     combination_pipelines = {
-        "VISUAL_AUDIO": VECTOR_PIPELINE_3_VISUAL_AUDIO,
-        "VISUAL_TRANSCRIPTION": VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION,
-        "AUDIO_TRANSCRIPTION": VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION,
+        # Visual_Audio variants
+        "VISUAL_AUDIO_VISUAL_FOCUS": (VECTOR_PIPELINE_3_VISUAL_AUDIO_VISUAL_FOCUS, COMBINATION_WEIGHTS["VISUAL_AUDIO_VISUAL_FOCUS"]),
+        "VISUAL_AUDIO_AUDIO_FOCUS": (VECTOR_PIPELINE_3_VISUAL_AUDIO_AUDIO_FOCUS, COMBINATION_WEIGHTS["VISUAL_AUDIO_AUDIO_FOCUS"]),
+        "VISUAL_AUDIO_BALANCED": (VECTOR_PIPELINE_3_VISUAL_AUDIO_BALANCED, COMBINATION_WEIGHTS["VISUAL_AUDIO_BALANCED"]),
+        
+        # Visual_Transcription variants
+        "VISUAL_TRANSCRIPTION_VISUAL_FOCUS": (VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION_VISUAL_FOCUS, COMBINATION_WEIGHTS["VISUAL_TRANSCRIPTION_VISUAL_FOCUS"]),
+        "VISUAL_TRANSCRIPTION_TEXT_FOCUS": (VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION_TEXT_FOCUS, COMBINATION_WEIGHTS["VISUAL_TRANSCRIPTION_TEXT_FOCUS"]),
+        "VISUAL_TRANSCRIPTION_BALANCED": (VECTOR_PIPELINE_3_VISUAL_TRANSCRIPTION_BALANCED, COMBINATION_WEIGHTS["VISUAL_TRANSCRIPTION_BALANCED"]),
+        
+        # Audio_Transcription variants
+        "AUDIO_TRANSCRIPTION_AUDIO_FOCUS": (VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION_AUDIO_FOCUS, COMBINATION_WEIGHTS["AUDIO_TRANSCRIPTION_AUDIO_FOCUS"]),
+        "AUDIO_TRANSCRIPTION_TEXT_FOCUS": (VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION_TEXT_FOCUS, COMBINATION_WEIGHTS["AUDIO_TRANSCRIPTION_TEXT_FOCUS"]),
+        "AUDIO_TRANSCRIPTION_BALANCED": (VECTOR_PIPELINE_3_AUDIO_TRANSCRIPTION_BALANCED, COMBINATION_WEIGHTS["AUDIO_TRANSCRIPTION_BALANCED"]),
     }
 
-    for combination, pipeline_id in combination_pipelines.items():
-        weights = COMBINATION_WEIGHTS[combination]
-
+    for combination_name, (pipeline_id, weights) in combination_pipelines.items():
         pipeline_body = {
-            "description": f"Post processor for hybrid RRF search with {combination} combination weights",
+            "description": f"Post processor for hybrid RRF search with {combination_name} weights",
             "phase_results_processors": [
                 {
                     "score-ranker-processor": {
@@ -1850,10 +2054,10 @@ def _create_combination_pipelines(client):
         try:
             client.search_pipeline.put(id=pipeline_id, body=pipeline_body)
             logger.info(
-                f"✓ Created {combination} combination search pipeline: {pipeline_id} with weights {weights}"
+                f"✓ Created {combination_name} pipeline: {pipeline_id} with weights {weights}"
             )
         except Exception as e:
-            logger.warning(f"✗ {combination} combination pipeline creation error: {e}")
+            logger.warning(f"✗ {combination_name} pipeline creation error: {e}")
 
 
 def _create_vector_search_pipeline_3_vector(client):

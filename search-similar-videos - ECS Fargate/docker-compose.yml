@@ -8,4 +8,4 @@ services:
       - .env
     environment:
       AWS_REGION: ${AWS_REGION:-us-east-1}
-    restart: unless-stopped
+    restart: no
