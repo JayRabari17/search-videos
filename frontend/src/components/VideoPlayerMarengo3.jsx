@@ -164,10 +164,8 @@ const VideoPlayerMarengo3 = ({ clip, allClips, onClose, onClipSelect }) => {
     }
   };
 
-  // Helper data
-  const otherMatches = allClips.filter(c => 
-    c.video_id === clip.video_id && c.timestamp_start !== clip.timestamp_start
-  );
+  // Helper data - get all clips from same video, maintaining search result order
+  const allMatchesFromVideo = allClips.filter(c => c.video_id === clip.video_id);
 
   const getAbsoluteIndex = (clipToFind) => {
     const index = allClips.findIndex(c => 
@@ -279,7 +277,7 @@ const VideoPlayerMarengo3 = ({ clip, allClips, onClose, onClipSelect }) => {
 
                   {/* Progress Bar */}
                   <div
-                    className="absolute h-full bg-purple-500 z-10 rounded-full relative"
+                    className="absolute h-full bg-blue-500 z-10 rounded-full relative"
                     style={{ width: `${(currentTime / videoDuration) * 100}%` }}
                   >
                     <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md scale-0 group-hover/timeline:scale-100 transition-transform" />
@@ -296,12 +294,12 @@ const VideoPlayerMarengo3 = ({ clip, allClips, onClose, onClipSelect }) => {
                 
                 {/* Left Controls: Play & Volume */}
                 <div className="flex items-center gap-3">
-                  <button onClick={(e) => { e.stopPropagation(); togglePlay(); }} className="hover:text-purple-400 transition-colors p-1">
+                  <button onClick={(e) => { e.stopPropagation(); togglePlay(); }} className="hover:text-blue-400 transition-colors p-1">
                     {isPlaying ? <Pause size={24} fill="currentColor" /> : <Play size={24} fill="currentColor" />}
                   </button>
 
                   <div className="flex items-center gap-2 group/volume">
-                    <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} className="hover:text-purple-400 transition-colors p-1">
+                    <button onClick={(e) => { e.stopPropagation(); toggleMute(); }} className="hover:text-blue-400 transition-colors p-1">
                       {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
                     </button>
                     <input
@@ -315,7 +313,7 @@ const VideoPlayerMarengo3 = ({ clip, allClips, onClose, onClipSelect }) => {
                       style={{
                         background: `linear-gradient(to right, white ${(isMuted ? 0 : volume) * 100}%, rgba(255,255,255,0.3) ${(isMuted ? 0 : volume) * 100}%)`
                       }}
-                      className="w-0 overflow-hidden group-hover/volume:w-20 transition-all duration-300 h-1 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-purple-400"
+                      className="w-0 overflow-hidden group-hover/volume:w-20 transition-all duration-300 h-1 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-blue-400"
                     />
                   </div>
                 </div>
@@ -326,7 +324,7 @@ const VideoPlayerMarengo3 = ({ clip, allClips, onClose, onClipSelect }) => {
                   <div className="relative">
                     <button 
                       onClick={() => setShowSpeedMenu(!showSpeedMenu)}
-                      className="text-xs font-bold hover:text-purple-400 transition-colors bg-white/10 px-2 py-1 rounded hover:bg-white/20 min-w-[32px]"
+                      className="text-xs font-bold hover:text-blue-400 transition-colors bg-white/10 px-2 py-1 rounded hover:bg-white/20 min-w-[32px]"
                     >
                       {playbackRate}x
                     </button>
@@ -336,7 +334,7 @@ const VideoPlayerMarengo3 = ({ clip, allClips, onClose, onClipSelect }) => {
                           <button
                             key={speed}
                             onClick={() => changeSpeed(speed)}
-                            className={`w-full px-2 py-1 text-left text-xs hover:bg-white/10 ${playbackRate === speed ? 'text-purple-400 font-bold' : 'text-gray-300'}`}
+                            className={`w-full px-2 py-1 text-left text-xs hover:bg-white/10 ${playbackRate === speed ? 'text-blue-400 font-bold' : 'text-gray-300'}`}
                           >
                             {speed}x
                           </button>
@@ -347,7 +345,7 @@ const VideoPlayerMarengo3 = ({ clip, allClips, onClose, onClipSelect }) => {
 
                   <button 
                     onClick={togglePiP} 
-                    className="hover:text-purple-400 transition-colors p-1.5 hover:bg-white/10 rounded-full"
+                    className="hover:text-blue-400 transition-colors p-1.5 hover:bg-white/10 rounded-full"
                     title="Picture in Picture"
                   >
                     <PictureInPicture size={20} />
@@ -355,7 +353,7 @@ const VideoPlayerMarengo3 = ({ clip, allClips, onClose, onClipSelect }) => {
 
                   <button 
                     onClick={toggleFullscreen} 
-                    className="hover:text-purple-400 transition-colors p-1.5 hover:bg-white/10 rounded-full"
+                    className="hover:text-blue-400 transition-colors p-1.5 hover:bg-white/10 rounded-full"
                     title="Fullscreen"
                   >
                     {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
@@ -371,68 +369,77 @@ const VideoPlayerMarengo3 = ({ clip, allClips, onClose, onClipSelect }) => {
           <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
             <span>Matches in this video</span>
             <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full text-xs">
-              {otherMatches.length}
+              {allMatchesFromVideo.length}
             </span>
           </h3>
         </div>
 
         {/* Scrollable Matches List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-          
-          {/* Current Clip Info */}
-          <div className="bg-white rounded-xl p-4 border border-purple-200 shadow-sm ring-1 ring-purple-100 relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-1 h-full bg-purple-500" />
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <div className="w-6 h-6 bg-purple-100 text-purple-600 rounded-md flex items-center justify-center text-xs font-bold">
-                  {currentClipIndex}
-                </div>
-                <span className="text-xs font-medium text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full">
-                  Current Clip
-                </span>
-              </div>
-              <div className="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-600 border border-gray-200">
-                {formatTimestamp(clip.timestamp_start)} - {formatTimestamp(clip.timestamp_end)}
-              </div>
-            </div>
-            
-            {clip.clip_text && (
-              <div className="flex items-start gap-3 text-sm text-gray-700 bg-gray-50/80 p-3 rounded-lg border border-gray-100">
-                <MessageSquare size={16} className="mt-0.5 text-purple-400 flex-shrink-0" />
-                <p className="leading-relaxed">{clip.clip_text}</p>
-              </div>
-            )}
-          </div>
-
-          {/* Other Matches */}
-          {otherMatches.map((match, idx) => {
+          {allMatchesFromVideo.map((match, idx) => {
             const matchAbsoluteIndex = getAbsoluteIndex(match);
+            const isCurrentClip = match.timestamp_start === clip.timestamp_start;
+            
             return (
               <div 
                 key={`${match.video_id}-${match.timestamp_start}-${idx}`}
-                className="group bg-white rounded-xl p-4 border border-gray-200 shadow-sm hover:border-purple-300 hover:shadow-md transition-all cursor-pointer relative overflow-hidden"
-                onClick={() => onClipSelect(match)}
+                className={`group rounded-xl p-4 border shadow-sm transition-all relative overflow-hidden ${
+                  isCurrentClip 
+                    ? 'bg-white border-blue-200 ring-1 ring-blue-100' 
+                    : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md cursor-pointer'
+                }`}
+                onClick={() => !isCurrentClip && onClipSelect(match)}
               >
-                <div className="absolute inset-y-0 left-0 w-1 bg-gray-200 group-hover:bg-purple-300 transition-colors" />
-                <div className="flex items-center justify-between mb-3 pl-2">
-                  <div className="w-6 h-6 bg-gray-100 text-gray-500 group-hover:bg-purple-50 group-hover:text-purple-600 rounded-md flex items-center justify-center text-xs font-bold transition-colors">
-                    {matchAbsoluteIndex}
+                <div className={`absolute top-0 left-0 w-1 h-full ${
+                  isCurrentClip ? 'bg-blue-500' : 'bg-gray-200 group-hover:bg-blue-300 transition-colors'
+                }`} />
+                
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold ${
+                      isCurrentClip 
+                        ? 'bg-blue-100 text-blue-600' 
+                        : 'bg-gray-100 text-gray-500 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors'
+                    }`}>
+                      {matchAbsoluteIndex}
+                    </div>
+                    {isCurrentClip && (
+                      <span className="text-xs font-medium text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
+                        Current Clip
+                      </span>
+                    )}
                   </div>
-                  <div className="text-xs font-mono bg-gray-100 px-2 py-1 rounded text-gray-600 group-hover:bg-purple-50 group-hover:text-purple-700 transition-colors">
+                  <div className={`text-xs font-mono px-2 py-1 rounded border ${
+                    isCurrentClip 
+                      ? 'bg-gray-100 text-gray-600 border-gray-200' 
+                      : 'bg-gray-100 text-gray-600 group-hover:bg-blue-50 group-hover:text-blue-700 transition-colors'
+                  }`}>
                     {formatTimestamp(match.timestamp_start)} - {formatTimestamp(match.timestamp_end)}
                   </div>
                 </div>
 
                 {match.clip_text && (
-                  <div className="flex items-start gap-3 text-sm text-gray-600 pl-2">
-                    <MessageSquare size={16} className="mt-0.5 text-gray-300 group-hover:text-purple-300 flex-shrink-0 transition-colors" />
-                    <p className="line-clamp-2 group-hover:text-gray-900 transition-colors">{match.clip_text}</p>
+                  <div className={`flex items-start gap-3 text-sm ${
+                    isCurrentClip 
+                      ? 'text-gray-700 bg-gray-50/80 p-3 rounded-lg border border-gray-100' 
+                      : 'text-gray-600 pl-2'
+                  }`}>
+                    <MessageSquare size={16} className={`mt-0.5 flex-shrink-0 ${
+                      isCurrentClip 
+                        ? 'text-blue-400' 
+                        : 'text-gray-300 group-hover:text-blue-300 transition-colors'
+                    }`} />
+                    <p className={isCurrentClip ? 'leading-relaxed' : 'line-clamp-2 group-hover:text-gray-900 transition-colors'}>
+                      {match.clip_text}
+                    </p>
                   </div>
                 )}
                 
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <ChevronRight size={20} className="text-purple-400" />
-                </div>
+                {!isCurrentClip && (
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <ChevronRight size={20} className="text-blue-400" />
+                  </div>
+                )}
               </div>
             );
           })}

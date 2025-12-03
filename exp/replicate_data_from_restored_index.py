@@ -50,7 +50,7 @@ def get_opensearch_client():
     client.info()
     return client
 
-SOURCE_INDEX = "video_clips_3"
+SOURCE_INDEX = "video_clips_3_lucene_copy"
 TARGET_INDEX = "video_clips_3_lucene"
 EMBEDDING_DIMENSIONS = 512
 
@@ -117,6 +117,12 @@ def get_target_index_definition():
                             "ef_construction": 512
                         }
                     }
+                },
+                "video_id": {
+                    "type": "keyword"
+                },
+                "clip_id": {
+                    "type": "keyword"
                 }
             }
         }

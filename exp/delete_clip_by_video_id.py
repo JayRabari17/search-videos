@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Constants
-INDEX_NAME = "video_clips_consolidated"
-CLIP_ID_TO_DELETE = "97fa4474-3f4d-43a1-b0ce-b84bfc5358f4"
+INDEX_NAME = "video_clips_3_lucene"
+CLIP_ID_TO_DELETE = "2e6e5a7b-c41f-4a0d-8a90-1f1f21a6ab93"
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)

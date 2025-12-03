@@ -128,20 +128,20 @@ const VideoClipCardMarengo3 = ({ clip, onClick, index }) => {
       </div>
 
       {/* Thumbnail strip placeholder */}
-      <div className="bg-gray-200 rounded-lg h-16 mb-3 flex items-center justify-center">
+      {/* <div className="bg-gray-200 rounded-lg h-16 mb-3 flex items-center justify-center">
         <span className="text-sm text-gray-500">Could not load thumbnails</span>
-      </div>
+      </div> */}
 
       {/* Footer Actions */}
-      <div className="flex items-center justify-end mt-2">
+      <div className="flex items-center justify-end mt-4">
         <button
           onClick={(e) => {
             e.stopPropagation();
             onClick(clip);
           }}
-          className="flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-purple-600 transition-colors"
+          className="flex items-center gap-1.5 text-sm font-medium text-gray-500 hover:text-blue-600 transition-colors"
         >
-          <span>See Full Video</span>
+          <span>View Video</span>
           <Play size={16} />
         </button>
       </div>

@@ -63,14 +63,14 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
                 transition={{ duration: 0.2 }}
                 className="text-sm font-medium whitespace-nowrap overflow-hidden"
               >
-                Explore
+                Video Library
               </motion.span>
             )}
           </AnimatePresence>
         </button>
 
         {/* Search Button */}
-        <button
+        {/* <button
           onClick={() => setActiveTab('search')}
           className={`w-full flex items-center gap-3 p-3 transition-all ${
             isExpanded ? 'rounded-lg' : 'rounded-full justify-center'
@@ -80,6 +80,34 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
               : 'text-blue-600 hover:bg-blue-50'
           }`}
         >
+          <Search className="w-6 h-6 flex-shrink-0" />
+          <AnimatePresence>
+            {isExpanded && (
+              <motion.span
+                initial={{ opacity: 0, width: 0 }}
+                animate={{ opacity: 1, width: 'auto' }}
+                exit={{ opacity: 0, width: 0 }}
+                transition={{ duration: 0.2 }}
+                className="text-sm font-medium whitespace-nowrap overflow-hidden"
+              >
+                Search
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </button> */}
+
+        {/* Marengo 3 Search Button */}
+        <button
+          onClick={() => setActiveTab('search-3')}
+          className={`w-full flex items-center gap-3 p-3 transition-all ${
+            isExpanded ? 'rounded-lg' : 'rounded-full justify-center'
+          } ${
+            activeTab === 'search-3' 
+              ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-lg' 
+              : 'text-blue-600 hover:bg-blue-50'
+          }`}
+        >
+          {/* <Sparkles className="w-6 h-6 flex-shrink-0" /> */}
           <Search className="w-6 h-6 flex-shrink-0" />
           <AnimatePresence>
             {isExpanded && (
@@ -123,32 +151,6 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
           </AnimatePresence>
         </button>
 
-        {/* Marengo 3 Search Button */}
-        <button
-          onClick={() => setActiveTab('search-3')}
-          className={`w-full flex items-center gap-3 p-3 transition-all ${
-            isExpanded ? 'rounded-lg' : 'rounded-full justify-center'
-          } ${
-            activeTab === 'search-3' 
-              ? 'bg-gradient-to-br from-purple-500 to-purple-600 text-white shadow-lg' 
-              : 'text-purple-600 hover:bg-purple-50'
-          }`}
-        >
-          <Sparkles className="w-6 h-6 flex-shrink-0" />
-          <AnimatePresence>
-            {isExpanded && (
-              <motion.span
-                initial={{ opacity: 0, width: 0 }}
-                animate={{ opacity: 1, width: 'auto' }}
-                exit={{ opacity: 0, width: 0 }}
-                transition={{ duration: 0.2 }}
-                className="text-sm font-medium whitespace-nowrap overflow-hidden"
-              >
-                Marengo 3
-              </motion.span>
-            )}
-          </AnimatePresence>
-        </button>
       </nav>
 
       {/* User Profile - Bottom */}
@@ -168,8 +170,8 @@ const Sidebar = ({ activeTab, setActiveTab }) => {
                 transition={{ duration: 0.2 }}
                 className="overflow-hidden"
               >
-                <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">sw1tch28</p>
-                <p className="text-xs text-gray-500 whitespace-nowrap">View profile</p>
+                <p className="text-sm font-semibold text-gray-900 whitespace-nowrap">Default user</p>
+                {/* <p className="text-xs text-gray-500 whitespace-nowrap">View profile</p> */}
               </motion.div>
             )}
           </AnimatePresence>

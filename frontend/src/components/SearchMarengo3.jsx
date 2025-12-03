@@ -80,13 +80,12 @@ function SearchMarengo3() {
             className="text-center mb-8"
           >
             <div className="flex items-center justify-center gap-2 mb-3">
-              <h1 className="text-5xl font-extrabold bg-gradient-to-r from-purple-600 to-purple-400 bg-clip-text text-transparent">
-                Marengo 3 Search
+              <h1 className="text-5xl font-extrabold bg-gradient-to-r from-blue-600 to-blue-400 bg-clip-text text-transparent">
+                Where should we begin?
               </h1>
-              <span className="text-3xl">✨</span>
             </div>
-            <p className="text-purple-600 text-lg">
-              Next-generation video search with Marengo 3 embeddings
+            <p className="text-blue-600 text-lg">
+              Search your video library with natural language
             </p>
           </motion.div>
         )}
@@ -111,33 +110,33 @@ function SearchMarengo3() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="flex flex-wrap gap-2 justify-center max-w-2xl"
+            className="flex flex-wrap gap-2 justify-center max-w-4xl"
           >
             <button
               onClick={() => {
-                handle_search('person walking in park');
+                handle_search('people dancing');
               }}
-              className="px-4 py-2 bg-white border border-purple-200 rounded-full hover:border-purple-600 hover:bg-purple-50 transition-all text-sm text-gray-700"
+              className="px-4 py-2 bg-white border border-blue-200 rounded-full hover:border-blue-600 hover:bg-blue-50 transition-all text-sm text-gray-700"
             >
-              person walking in park
+              people dancing
             </button>
             <button
               onClick={() => {
-                handle_search('sunset scene')
+                handle_search('scenes with dinosaur')
               }
             }
-              className="px-4 py-2 bg-white border border-purple-200 rounded-full hover:border-purple-600 hover:bg-purple-50 transition-all text-sm text-gray-700"
+              className="px-4 py-2 bg-white border border-blue-200 rounded-full hover:border-blue-600 hover:bg-blue-50 transition-all text-sm text-gray-700"
             >
-              sunset scene
+              scenes with dinosaur
             </button>
             <button
               onClick={() => {
-                handle_search('people talking')
+                handle_search('person drinking mountain dew')
               }
               }
-              className="px-4 py-2 bg-white border border-purple-200 rounded-full hover:border-purple-600 hover:bg-purple-50 transition-all text-sm text-gray-700"
+              className="px-4 py-2 bg-white border border-blue-200 rounded-full hover:border-blue-600 hover:bg-blue-50 transition-all text-sm text-gray-700"
             >
-              people talking
+              person drinking mountain dew
             </button>
           </motion.div>
         )}
@@ -162,8 +161,8 @@ function SearchMarengo3() {
           {/* Loading State */}
           {isLoading && (
             <div className="text-center py-16">
-              <div className="inline-block w-16 h-16 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mb-4"></div>
-              <p className="text-gray-600">Searching videos with Marengo 3...</p>
+              <div className="inline-block w-16 h-16 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-4"></div>
+              <p className="text-gray-600">Searching videos....</p>
             </div>
           )}
 
@@ -183,8 +182,8 @@ function SearchMarengo3() {
           {/* No Results */}
           {!isLoading && query && clips.length === 0 && (
             <div className="text-center py-16">
-              <div className="w-24 h-24 bg-gradient-to-br from-purple-100 to-purple-200 rounded-full flex items-center justify-center mx-auto mb-6">
-                <Search size={48} className="text-purple-600" />
+              <div className="w-24 h-24 bg-gradient-to-br from-blue-100 to-blue-200 rounded-full flex items-center justify-center mx-auto mb-6">
+                <Search size={48} className="text-blue-600" />
               </div>
               <h3 className="text-2xl font-bold text-gray-900 mb-3">
                 No results found

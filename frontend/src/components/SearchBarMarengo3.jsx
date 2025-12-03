@@ -28,13 +28,13 @@ const SearchBarMarengo3 = ({ onSearch, isLoading, onSearchTypeChange, queryValue
     // Single modality selections
     if (visual && !audio && !transcription) return 'visual';
     if (!visual && audio && !transcription) return 'audio';
-    if (!visual && !audio && transcription) return 'transcription';
+    // if (!visual && !audio && transcription) return 'transcription';
     
     // UPDATED: 7 search options - specific combinations instead of intent-based
     // Two-modality combinations
-    if (visual && audio && !transcription) return 'visual_audio';
-    if (visual && !audio && transcription) return 'visual_transcription';
-    if (!visual && audio && transcription) return 'audio_transcription';
+    if (visual && audio && !transcription) return 'vector';
+    // if (visual && !audio && transcription) return 'visual_transcription';
+    // if (!visual && audio && transcription) return 'audio_transcription';
     
     // All three modalities → 'vector' (balanced search)
     if (visual && audio && transcription) return 'vector';
@@ -232,7 +232,7 @@ const SearchBarMarengo3 = ({ onSearch, isLoading, onSearchTypeChange, queryValue
         <button
           type="submit"
           disabled={isLoading || (!query.trim() && !selectedImage)}
-          className="flex items-center justify-center w-14 h-14 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-300 text-white rounded-2xl transition-colors shadow-sm hover:shadow-md disabled:cursor-not-allowed flex-shrink-0"
+          className="flex items-center justify-center w-14 h-14 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-2xl transition-colors shadow-sm hover:shadow-md disabled:cursor-not-allowed flex-shrink-0"
           title="Search"
         >
           {isLoading ? (
@@ -261,56 +261,35 @@ const SearchBarMarengo3 = ({ onSearch, isLoading, onSearchTypeChange, queryValue
 
           {/* Dropdown Menu - Positioned below options button */}
           {showDropdown && (
-            <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-lg border border-gray-200 shadow-lg p-3 z-50">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Search Options</h3>
-              
-              <div className="space-y-2">
+            <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl border border-gray-100 shadow-2xl p-2 z-50">
+              <div className="flex flex-col gap-1">
                 {/* Visual Checkbox */}
-                <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1.5 rounded">
+                <label className="flex items-center justify-between cursor-pointer hover:bg-gray-50 px-4 py-3 rounded-xl transition-colors group">
+                  <span className="text-sm font-medium text-gray-600 group-hover:text-gray-900">Visual</span>
+                  <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${visual ? 'bg-blue-600 border-blue-600' : 'border-gray-300 bg-white'}`}>
+                    {visual && <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                  </div>
                   <input
                     type="checkbox"
                     checked={visual}
                     onChange={handleVisualChange}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                    className="hidden"
                   />
-                  <span className="text-sm font-medium text-gray-700">Visual</span>
                 </label>
 
                 {/* Audio Checkbox */}
-                <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1.5 rounded">
+                <label className="flex items-center justify-between cursor-pointer hover:bg-gray-50 px-4 py-3 rounded-xl transition-colors group">
+                  <span className="text-sm font-medium text-gray-600 group-hover:text-gray-900">Audio</span>
+                  <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${audio ? 'bg-blue-600 border-blue-600' : 'border-gray-300 bg-white'}`}>
+                    {audio && <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                  </div>
                   <input
                     type="checkbox"
                     checked={audio}
                     onChange={handleAudioChange}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
+                    className="hidden"
                   />
-                  <span className="text-sm font-medium text-gray-700">Audio</span>
                 </label>
-
-                {/* Transcription Checkbox */}
-                <label className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1.5 rounded">
-                  <input
-                    type="checkbox"
-                    checked={transcription}
-                    onChange={handleTranscriptionChange}
-                    className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-2 focus:ring-blue-500"
-                  />
-                  <span className="text-sm font-medium text-gray-700">Transcription</span>
-                </label>
-              </div>
-
-              {/* Search Type Display */}
-              <div className="mt-2 pt-2 border-t border-gray-200">
-                <p className="text-xs text-gray-500">
-                  Type: <span className="font-semibold text-gray-700">{getSearchType()}</span>
-                </p>
-              </div>
-
-              {/* Combined Search Info */}
-              <div className="mt-2 pt-2 border-t border-gray-200">
-                <p className="text-xs text-gray-600">
-                  💡 Tip: Use text + image together for multimodal search
-                </p>
               </div>
             </div>
           )}
