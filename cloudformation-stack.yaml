@@ -803,6 +803,28 @@ Resources:
         - !Ref VPCEndpointSecurityGroup
       PrivateDnsEnabled: true
 
+  OpenSearchRoleMappingLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${StackPrefix}-opensearch-role-mapper-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AssumeAdminRole
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: sts:AssumeRole
+                Resource: !GetAtt OpenSearchAdminRole.Arn
+
   OpenSearchAdminRole:
     Type: AWS::IAM::Role
     Properties:
@@ -814,6 +836,27 @@ Resources:
             Principal:
               AWS: !Sub 'arn:aws:iam::${AccountId}:root'
             Action: sts:AssumeRole
+          - Effect: Allow
+            Principal:
+              AWS: !GetAtt OpenSearchRoleMappingLambdaRole.Arn
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: OpenSearchAdminAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - es:ESHttpGet
+                  - es:ESHttpPost
+                  - es:ESHttpPut
+                  - es:ESHttpPatch
+                  - es:ESHttpDelete
+                  - es:ESHttpHead
+                  - es:DescribeDomain
+                Resource:
+                  - !Sub 'arn:aws:es:${Region}:${AccountId}:domain/${StackPrefix}-aos-domain'
+                  - !Sub 'arn:aws:es:${Region}:${AccountId}:domain/${StackPrefix}-aos-domain/*'
 
   OpenSearchDomain:
     Type: AWS::OpenSearchService::Domain
@@ -850,6 +893,9 @@ Resources:
                 - !GetAtt ECSTaskRole.Arn
                 - !GetAtt SearchSimilarVideosTaskRole.Arn
                 - !GetAtt StoreEmbeddingsLambdaRole.Arn
+                - !GetAtt CreateSnapshotLambdaRole.Arn
+                - !GetAtt OpenSearchAdminRole.Arn
+                - !Sub 'arn:aws:iam::${AccountId}:root'
             Action:
               - es:ESHttpGet
               - es:ESHttpPost
@@ -954,7 +1000,7 @@ Resources:
       Port: 8000
       TargetType: ip
       VpcId: !Ref VPC
-      HealthCheckPath: /
+      HealthCheckPath: /health
       HealthCheckProtocol: HTTP
       HealthCheckIntervalSeconds: 30
       HealthCheckTimeoutSeconds: 5
@@ -973,7 +1019,9 @@ Resources:
 
   ECSService:
     Type: AWS::ECS::Service
-    DependsOn: ALBListener
+    DependsOn:
+      - ALBListener
+      - OpenSearchRoleMappingCustomResource
     Properties:
       ServiceName: !Sub '${StackPrefix}-service'
       Cluster: !Ref ECSCluster
@@ -1115,7 +1163,9 @@ Resources:
 
   StoreEmbeddingsFunction:
     Type: AWS::Lambda::Function
-    DependsOn: OpenSearchDomain
+    DependsOn:
+      - OpenSearchDomain
+      - OpenSearchRoleMappingCustomResource
     Properties:
       FunctionName: !Sub '${StackPrefix}-store-embeddings-opensearch'
       Runtime: python3.13
@@ -1285,7 +1335,9 @@ Resources:
 
   CreateSnapshotFunction:
     Type: AWS::Lambda::Function
-    DependsOn: OpenSearchDomain
+    DependsOn:
+      - OpenSearchDomain
+      - OpenSearchRoleMappingCustomResource
     Properties:
       FunctionName: !Sub '${StackPrefix}-create-opensearch-snapshot'
       Runtime: python3.12
@@ -1379,6 +1431,188 @@ Resources:
               except Exception as e:
                   logger.error(f"Error: {str(e)}", exc_info=True)
                   return {"statusCode": 500, "body": json.dumps({"error": "Internal server error", "message": str(e)})}
+
+  OpenSearchRoleMappingLambda:
+    Type: AWS::Lambda::Function
+    DependsOn: OpenSearchDomain
+    Properties:
+      FunctionName: !Sub '${StackPrefix}-opensearch-role-mapper'
+      Runtime: python3.13
+      Handler: index.lambda_handler
+      Timeout: 60
+      MemorySize: 256
+      Role: !GetAtt OpenSearchRoleMappingLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import urllib3
+          from botocore.auth import SigV4Auth
+          from botocore.awsrequest import AWSRequest
+          
+          http = urllib3.PoolManager()
+          sts = boto3.client('sts')
+          
+          def send_response(event, context, status, data=None):
+              """Send response to CloudFormation"""
+              response_body = {
+                  'Status': status,
+                  'PhysicalResourceId': event.get('PhysicalResourceId', 'OpenSearchRoleMapping'),
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data or {}
+              }
+              
+              try:
+                  http.request(
+                      'PUT',
+                      event['ResponseURL'],
+                      body=json.dumps(response_body),
+                      headers={'Content-Type': 'application/json'}
+                  )
+              except Exception as e:
+                  print(f"Failed to send response: {str(e)}")
+          
+          def lambda_handler(event, context):
+              """Maps IAM roles to OpenSearch internal roles"""
+              print(f"Event: {json.dumps(event)}")
+              
+              try:
+                  # Handle CloudFormation Delete
+                  if event['RequestType'] == 'Delete':
+                      print("Delete request - no action needed")
+                      send_response(event, context, 'SUCCESS')
+                      return
+                  
+                  # Get parameters from custom resource properties
+                  domain_endpoint = event['ResourceProperties']['DomainEndpoint'].replace('https://', '').replace('http://', '')
+                  admin_role_arn = event['ResourceProperties']['AdminRoleArn']
+                  role_mappings = event['ResourceProperties']['RoleMappings']
+                  
+                  print(f"Domain: {domain_endpoint}")
+                  print(f"Admin Role: {admin_role_arn}")
+                  print(f"Mappings: {json.dumps(role_mappings, indent=2)}")
+                  
+                  # Assume the admin role
+                  print("🔑 Assuming OpenSearch Admin Role...")
+                  assumed_role = sts.assume_role(
+                      RoleArn=admin_role_arn,
+                      RoleSessionName='cfn-opensearch-mapper',
+                      DurationSeconds=900
+                  )
+                  
+                  admin_creds = assumed_role['Credentials']
+                  print("✅ Admin role assumed successfully")
+                  
+                  # Create credentials object for SigV4Auth
+                  class TempCredentials:
+                      def __init__(self, access_key, secret_key, token):
+                          self.access_key = access_key
+                          self.secret_key = secret_key
+                          self.token = token
+                  
+                  credentials = TempCredentials(
+                      admin_creds['AccessKeyId'],
+                      admin_creds['SecretAccessKey'],
+                      admin_creds['SessionToken']
+                  )
+                  
+                  region = 'us-east-1'
+                  service = 'es'
+                  results = {}
+                  
+                  # Map each role
+                  for opensearch_role, backend_roles in role_mappings.items():
+                      url = f"https://{domain_endpoint}/_plugins/_security/api/rolesmapping/{opensearch_role}"
+                      
+                      # Get existing mapping first
+                      get_request = AWSRequest(
+                          method='GET',
+                          url=url,
+                          headers={'Content-Typ'applin'}
+                      )
+                      SigV4Auth(credentials, service, region).add_auth(get_request)
+                      
+                      get_response = http.request(
+                          method=get_request.method,
+                          url=get_request.url,
+                          headers=dict(get_request.headers)
+                      )
+                      
+                      existing_mapping = {}
+                      if get_response.status == 200:
+                          response_json = json.loads(get_response.data.decode('utf-8'))
+                          existing_mapping = response_json.get(opensearch_role, {})
+                      
+                      # Build complete mapping
+                      body = {
+                          "backend_roles": backend_roles,
+                          "hosts": existing_mapping.get("hosts", []),
+                          "users": existing_mapping.get("users", [])
+                      }
+                      
+                      print(f"📝 Mapping {opensearch_role} with {len(backend_roles)} roles")
+                      
+                      # PUT to update mapping
+                      request = AWSRequest(
+                          method='PUT',
+                          url=url,
+                          data=json.dumps(body),
+                          headers={'Content-Type': 'application/json'}
+                      )
+                      SigV4Auth(credentials, service, region).add_auth(request)
+                      
+                      response = http.request(
+                          method=request.method,
+                          url=request.url,
+                          body=request.body,
+                          headers=dict(request.headers)
+                      )
+                      
+                      response_data = response.data.decode('utf-8')
+                      print(f"Response: {response.status} - {response_data}")
+                      
+                      if response.status in [200, 201]:
+                          results[opensearch_role] = 'SUCCESS'
+                      else:
+                          results[opensearch_role] = f'FAILED: {response_data}'
+                  
+                  # Check for failures
+                  failures = [role for role, result in results.items() if 'FAILED' in result]
+                  
+                  if failures:
+                      print(f"❌ Failed to map: {failures}")
+                      send_response(event, context, 'FAILED', {'Results': results})
+                  else:
+                      print(f"✅ All mappings successful")
+                      send_response(event, context, 'SUCCESS', {'Results': results})
+              
+              except Exception as e:
+                  print(f"❌ Error: {str(e)}")
+                  import traceback
+                  traceback.print_exc()
+                  send_response(event, context, 'FAILED', {'Error': str(e)})
+
+  OpenSearchRoleMappingCustomResource:
+    Type: Custom::OpenSearchRoleMapping
+    DependsOn:
+      - OpenSearchDomain
+      - OpenSearchRoleMappingLambda
+      - StoreEmbeddingsLambdaRole
+      - CreateSnapshotLambdaRole
+      - SearchSimilarVideosTaskRole
+    Properties:
+      ServiceToken: !GetAtt OpenSearchRoleMappingLambda.Arn
+      DomainEndpoint: !GetAtt OpenSearchDomain.DomainEndpoint
+      AdminRoleArn: !GetAtt OpenSearchAdminRole.Arn
+      RoleMappings:
+        all_access:
+          - !GetAtt StoreEmbeddingsLambdaRole.Arn
+          - !GetAtt CreateSnapshotLambdaRole.Arn
+          - !GetAtt SearchSimilarVideosTaskRole.Arn
+          - !GetAtt ECSTaskRole.Arn
+          - !Sub 'arn:aws:iam::${AccountId}:root'
 
   InvokeBedrockMarengoInvokePermission:
     Type: AWS::Lambda::Permission
@@ -1546,151 +1780,7 @@ Resources:
             }
           }
         }
-
-  # OpenSearchRoleMappingLambdaRole:
-  #   Type: AWS::IAM::Role
-  #   Properties:
-  #     RoleName: !Sub '${StackPrefix}-opensearch-role-mapping-lambda-role'
-  #     AssumeRolePolicyDocument:
-  #       Version: '2012-10-17'
-  #       Statement:
-  #         - Effect: Allow
-  #           Principal:
-  #             Service: lambda.amazonaws.com
-  #           Action: sts:AssumeRole
-  #     ManagedPolicyArns:
-  #       - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-  #     Policies:
-  #       - PolicyName: OpenSearchAccess
-  #         PolicyDocument:
-  #           Version: '2012-10-17'
-  #           Statement:
-  #             - Effect: Allow
-  #               Action:
-  #                 - es:ESHttpPut
-  #                 - es:ESHttpGet
-  #                 - es:ESHttpPost
-  #               Resource: !Sub 'arn:aws:es:${Region}:${AccountId}:domain/${StackPrefix}-aos-domain/*'
-
-  # OpenSearchRoleMappingLambda:
-  #   Type: AWS::Lambda::Function
-  #   DependsOn: OpenSearchDomain
-  #   Properties:
-  #     FunctionName: !Sub '${StackPrefix}-opensearch-role-mapping'
-  #     Runtime: python3.11
-  #     Handler: index.handler
-  #     Timeout: 300
-  #     MemorySize: 512
-  #     Role: !GetAtt OpenSearchRoleMappingLambdaRole.Arn
-  #     VpcConfig:
-  #       SubnetIds:
-  #         - !Ref PrivateSubnet1
-  #         - !Ref PrivateSubnet2
-  #       SecurityGroupIds:
-  #         - !Ref LambdaSecurityGroup
-  #     Code:
-  #       ZipFile: |
-  #         import json
-  #         import boto3
-  #         import urllib3
-  #         from botocore.awsrequest import AWSRequest
-  #         from botocore.auth import SigV4Auth
-  #         import traceback
-  #         
-  #         http = urllib3.PoolManager()
-  #         
-  #         def send_cfn_response(event, context, status, data=None, reason=None):
-  #             """Send response to CloudFormation custom resource"""
-  #             try:
-  #                 response_url = event['ResponseURL']
-  #                 response_body = {
-  #                     'Status': status,
-  #                     'PhysicalResourceId': event.get('PhysicalResourceId', event['LogicalResourceId']),
-  #                     'StackId': event['StackId'],
-  #                     'RequestId': event['RequestId'],
-  #                     'LogicalResourceId': event['LogicalResourceId'],
-  #                     'Data': data or {},
-  #                     'Reason': reason or f'{status}: See CloudWatch Logs'
-  #                 }
-  #                 print(f"Sending {status} response: {json.dumps(response_body)}")
-  #                 headers = {'Content-Type': 'application/json'}
-  #                 http.request('PUT', response_url, body=json.dumps(response_body), headers=headers)
-  #             except Exception as e:
-  #                 print(f"CRITICAL: Failed to send CFN response: {str(e)}")
-  #         
-  #         def signed_request(method, url, region, service, credentials, json_body=None):
-  #             """Make signed AWS request"""
-  #             body = json.dumps(json_body) if json_body else None
-  #             headers = {'Content-Type': 'application/json'}
-  #             aws_request = AWSRequest(method=method.upper(), url=url, data=body, headers=headers)
-  #             SigV4Auth(credentials, service, region).add_auth(aws_request)
-  #             response = http.request(
-  #                 method=aws_request.method,
-  #                 url=aws_request.url,
-  #                 body=aws_request.body,
-  #                 headers=dict(aws_request.headers)
-  #             )
-  #             return response
-  #         
-  #         def handler(event, context):
-  #             """Main handler"""
-  #             print(f"Event: {json.dumps(event)}")
-  #             try:
-  #                 request_type = event['RequestType']
-  #                 if request_type == 'Delete':
-  #                     send_cfn_response(event, context, 'SUCCESS', {'Message': 'Delete OK'})
-  #                     return
-  #                 
-  #                 domain = event['ResourceProperties']['DomainEndpoint'].replace('https://', '').replace('http://', '')
-  #                 role_mappings = json.loads(event['ResourceProperties']['RoleMappings'])
-  #                 
-  #                 session = boto3.Session()
-  #                 credentials = session.get_credentials().get_frozen_credentials()
-  #                 
-  #                 results = {}
-  #                 for role_name, backend_roles in role_mappings.items():
-  #                     url = f"https://{domain}/_plugins/_security/api/rolesmapping/{role_name}"
-  #                     body = {"backend_roles": backend_roles, "hosts": [], "users": []}
-  #                     
-  #                     print(f"Creating role mapping: {role_name}")
-  #                     resp = signed_request('PUT', url, 'us-east-1', 'es', credentials, body)
-  #                     print(f"Response: {resp.status} {resp.data.decode('utf-8')}")
-  #                     
-  #                     if resp.status not in [200, 201]:
-  #                         results[role_name] = f'FAILED: {resp.data.decode("utf-8")}'
-  #                     else:
-  #                         results[role_name] = 'SUCCESS'
-  #                 
-  #                 failures = [k for k, v in results.items() if 'FAILED' in v]
-  #                 if failures:
-  #                     send_cfn_response(event, context, 'FAILED', results, f'Failed: {failures}')
-  #                 else:
-  #                     send_cfn_response(event, context, 'SUCCESS', results, 'All mappings created')
-  #             
-  #             except Exception as e:
-  #                 error = f"Error: {str(e)}\n{traceback.format_exc()}"
-  #                 print(error)
-  #                 send_cfn_response(event, context, 'FAILED', {}, error)
-
-  # OpenSearchRoleMappingCustomResource:
-  #   Type: Custom::OpenSearchRoleMapping
-  #   DependsOn:
-  #     - OpenSearchDomain
-  #     - OpenSearchRoleMappingLambda
-  #   Properties:
-  #     ServiceToken: !GetAtt OpenSearchRoleMappingLambda.Arn
-  #     DomainEndpoint: !GetAtt OpenSearchDomain.DomainEndpoint
-  #     RoleMappings: !Sub |
-  #       {
-  #         "ecs_app_role": [
-  #           "${ECSTaskRole.Arn}",
-  #           "${SearchSimilarVideosTaskRole.Arn}"
-  #         ],
-  #         "lambda_ingest_role": [
-  #           "${StoreEmbeddingsLambdaRole.Arn}"
-  #         ]
-  #       }
-
+        
 Outputs:
   VPCId:
     Description: VPC ID
@@ -1826,13 +1916,11 @@ Outputs:
     Export:
       Name: !Sub '${AWS::StackName}-ECSServiceName'
 
-  # OpenSearchRoleMappingLambdaArn:
-  #   Description: OpenSearch Role Mapping Lambda Function ARN
-  #   Value: !GetAtt OpenSearchRoleMappingLambda.Arn
-  #   Export:
-  #     Name: !Sub '${AWS::StackName}-OpenSearchRoleMappingLambdaArn'
-
-
+  OpenSearchRoleMappingLambdaArn:
+    Description: OpenSearch Role Mapping Lambda Function ARN
+    Value: !GetAtt OpenSearchRoleMappingLambda.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-OpenSearchRoleMappingLambdaArn'
 
   OpenSearchAdminRoleArn:
     Description: OpenSearch Admin IAM Role ARN
