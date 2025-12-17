@@ -1,16 +1,28 @@
 import axios from 'axios';
+import runtimeConfig from '../config/runtimeConfig.js';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-const BACKEND_ALB_URL = import.meta.env.VITE_BACKEND_ALB_URL
-
-const BACKEND_URL = process.env.NODE_ENV === 'development' ? API_BASE_URL : BACKEND_ALB_URL
-
+// Legacy axios instance - kept for backward compatibility if needed
+// Note: Most functions now use fetch with dynamic URLs from runtimeConfig
 const api = axios.create({
-  baseURL: BACKEND_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+/**
+ * Helper function to get backend URL from runtime configuration
+ * Ensures configuration is loaded before making API calls
+ * @returns {Promise<string>} Backend URL
+ */
+const getBackendUrl = async () => {
+  try {
+    await runtimeConfig.load();
+    return runtimeConfig.getBackendUrl();
+  } catch (error) {
+    console.error('❌ Failed to load configuration:', error.message);
+    throw new Error(`Configuration error: ${error.message}`);
+  }
+};
 
 // Old searchClips - commented out
 // export const searchClips = async (query, topK = 10) => {
@@ -42,6 +54,9 @@ const fileToBase64 = (file) => {
 // Unified search function - handles both text and image searches
 export const searchClips = async (query, topK = 10, searchType = 'vector', imageFile = null) => {
   try {
+    // Load config first
+    const backendUrl = await getBackendUrl();
+
     // Validate that at least one input is provided
     if (!query && !imageFile) {
       throw new Error('Either query text or image file is required');
@@ -92,7 +107,7 @@ export const searchClips = async (query, topK = 10, searchType = 'vector', image
       requestBody.image_base64 = base64String;
     }
 
-    const response = await fetch(`${BACKEND_URL}/search`, {
+    const response = await fetch(`${backendUrl}/search`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -130,6 +145,9 @@ export const searchClipsWithImage = async (imageFile, topK = 10, searchType = 'v
 // Supported search types: 'vector', 'visual', 'audio', 'transcription'
 export const searchClipsMarengo3 = async (query = null, topK = 10, searchType = 'vector', imageFile = null) => {
   try {
+    // Load config first
+    const backendUrl = await getBackendUrl();
+
     // Validate that at least one input is provided
     if (!query && !imageFile) {
       throw new Error('Either query text or image file is required');
@@ -203,7 +221,7 @@ export const searchClipsMarengo3 = async (query = null, topK = 10, searchType = 
     }
 
     console.log(`📤 Sending ${searchInputType} request to /search-3 (searchType: ${searchType})`);
-    const response = await fetch(`${BACKEND_URL}/search-3`, {
+    const response = await fetch(`${backendUrl}/search-3`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -275,7 +293,10 @@ export const searchClipsTranscriptionMarengo3 = async (query, topK = 10, imageFi
 
 export const listAllVideos = async () => {
   try {
-    const response = await fetch(`${BACKEND_URL}/list`, {
+    // Load config first
+    const backendUrl = await getBackendUrl();
+
+    const response = await fetch(`${backendUrl}/list`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -292,7 +313,10 @@ export const listAllVideos = async () => {
 
 export const getPresignedUploadUrl = async (filename) => {
   try {
-    const response = await fetch(`${BACKEND_URL}/generate-upload-presigned-url?filename=${encodeURIComponent(filename)}`, {
+    // Load config first
+    const backendUrl = await getBackendUrl();
+
+    const response = await fetch(`${backendUrl}/generate-upload-presigned-url?filename=${encodeURIComponent(filename)}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

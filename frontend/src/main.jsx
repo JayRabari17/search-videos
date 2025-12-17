@@ -2,9 +2,31 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
+import runtimeConfig from './config/runtimeConfig.js'
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-)
+// Preload configuration before rendering React app
+console.log('🚀 Initializing application...');
+
+runtimeConfig.load()
+  .then(() => {
+    console.log('✓ Configuration loaded successfully');
+    console.log('🎯 Starting React application...');
+    
+    // Render React app after configuration is loaded
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>,
+    );
+  })
+  .catch((error) => {
+    console.error('❌ Failed to load configuration:', error.message);
+    console.log('⚠️ Starting app anyway - API calls will handle configuration loading');
+    
+    // Still render app (will fail gracefully on API calls)
+    ReactDOM.createRoot(document.getElementById('root')).render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>,
+    );
+  });

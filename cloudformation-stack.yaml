@@ -26,6 +26,19 @@ Parameters:
   Region:
     Type: String
     Default: 'us-east-1'
+  # ============ NEW PARAMETERS FOR FRONTEND CONFIG AUTOMATION ============
+  FrontendS3Bucket:
+    Type: String
+    Default: 'condenast-fe'
+    Description: S3 bucket where frontend static site is hosted
+  DemoApiBaseUrl:
+    Type: String
+    Default: 'your-api-base-url'
+    Description: Base URL for demo apps management API
+  DemoAppId:
+    Type: String
+    Default: 'your-id'
+    Description: Demo application ID for completion callback
 
 Resources:
   ECSTaskExecutionRole:
@@ -505,6 +518,38 @@ Resources:
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
                 Resource: '*'
+
+  # ============ NEW IAM ROLE FOR FRONTEND CONFIG UPDATE LAMBDA ============
+  UpdateFrontendConfigLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${StackPrefix}-update-frontend-config-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3ConfigAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:PutObjectAcl
+                  - s3:GetObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${FrontendS3Bucket}/*'
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::${FrontendS3Bucket}'
   VPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -823,10 +868,11 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: sts:AssumeRole
-                Resource: !GetAtt OpenSearchAdminRole.Arn
+                Resource: !Sub 'arn:aws:iam::${AccountId}:role/${StackPrefix}-opensearch-admin'
 
   OpenSearchAdminRole:
     Type: AWS::IAM::Role
+    DependsOn: OpenSearchRoleMappingLambdaRole
     Properties:
       RoleName: !Sub '${StackPrefix}-opensearch-admin'
       AssumeRolePolicyDocument:
@@ -1437,7 +1483,7 @@ Resources:
     DependsOn: OpenSearchDomain
     Properties:
       FunctionName: !Sub '${StackPrefix}-opensearch-role-mapper'
-      Runtime: python3.13
+      Runtime: python3.11
       Handler: index.lambda_handler
       Timeout: 60
       MemorySize: 256
@@ -1530,7 +1576,7 @@ Resources:
                       get_request = AWSRequest(
                           method='GET',
                           url=url,
-                          headers={'Content-Typ'applin'}
+                          headers={'Content-Type': 'application/json'}
                       )
                       SigV4Auth(credentials, service, region).add_auth(get_request)
                       
@@ -1594,6 +1640,170 @@ Resources:
                   traceback.print_exc()
                   send_response(event, context, 'FAILED', {'Error': str(e)})
 
+  # ============ NEW LAMBDA FUNCTION FOR FRONTEND CONFIG UPDATE ============
+  UpdateFrontendConfigLambda:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - ApplicationLoadBalancer
+      - ECSService
+    Properties:
+      FunctionName: !Sub '${StackPrefix}-update-frontend-config'
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Timeout: 60
+      MemorySize: 256
+      Role: !GetAtt UpdateFrontendConfigLambdaRole.Arn
+      Environment:
+        Variables:
+          STACK_NAME: !Ref AWS::StackName
+          FRONTEND_S3_BUCKET: !Ref FrontendS3Bucket
+          DEMO_API_BASE_URL: !Ref DemoApiBaseUrl
+          DEMO_APP_ID: !Ref DemoAppId
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import urllib3
+          from datetime import datetime
+          import os
+          
+          http = urllib3.PoolManager()
+          s3 = boto3.client('s3')
+          
+          def send_response(event, context, status, data=None):
+              """Send response to CloudFormation"""
+              response_body = {
+                  'Status': status,
+                  'PhysicalResourceId': event.get('PhysicalResourceId', 'UpdateFrontendConfig'),
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'Data': data or {}
+              }
+              
+              try:
+                  http.request(
+                      'PUT',
+                      event['ResponseURL'],
+                      body=json.dumps(response_body),
+                      headers={'Content-Type': 'application/json'}
+                  )
+              except Exception as e:
+                  print(f"Failed to send response: {str(e)}")
+          
+          def lambda_handler(event, context):
+              """Update frontend config.json and call demo completion API"""
+              print(f"Event: {json.dumps(event)}")
+              
+              try:
+                  if event['RequestType'] == 'Delete':
+                      print("Delete request - no action needed")
+                      send_response(event, context, 'SUCCESS')
+                      return
+                  
+                  # Get values from custom resource properties
+                  resource_properties = event.get('ResourceProperties', {})
+                  alb_dns = resource_properties.get('ALBDNSName')
+                  
+                  if not alb_dns:
+                      raise ValueError("ALBDNSName not provided in custom resource properties")
+                  
+                  s3_bucket = os.environ['FRONTEND_S3_BUCKET']
+                  demo_api_base_url = os.environ['DEMO_API_BASE_URL']
+                  demo_app_id = os.environ['DEMO_APP_ID']
+                  
+                  backend_url = f"http://{alb_dns}"
+                  print(f"✅ Backend URL: {backend_url}")
+                  print(f"✅ ALB DNS from custom resource properties: {alb_dns}")
+                  
+                  # Create config.json
+                  config = {
+                      "backendUrl": backend_url,
+                      "apiVersion": "v1",
+                      "environment": "production",
+                      "features": {
+                          "marengo3Enabled": True,
+                          "uploadEnabled": True,
+                          "maxUploadSizeMB": 5
+                      },
+                      "endpoints": {
+                          "search": "/search",
+                          "search3": "/search-3",
+                          "list": "/list",
+                          "upload": "/generate-upload-presigned-url",
+                          "health": "/health"
+                      },
+                      "metadata": {
+                          "lastUpdated": datetime.utcnow().isoformat() + "Z",
+                          "version": "1.0.0",
+                          "source": "cloudformation-lambda"
+                      }
+                  }
+                  
+                  print(f"📄 Config created: {json.dumps(config, indent=2)}")
+                  
+                  # Upload to S3
+                  print(f"📤 Uploading config.json to s3://{s3_bucket}/config.json")
+                  s3.put_object(
+                      Bucket=s3_bucket,
+                      Key='config.json',
+                      Body=json.dumps(config, indent=2),
+                      ContentType='application/json',
+                      ContentDisposition='inline',              # ← NEW LINE
+                      CacheControl='no-cache, no-store, must-revalidate',
+                      ACL='public-read',                        # ← NEW LINE (MAKES IT PUBLIC!)
+                      Metadata={
+                          'updated-by': 'cloudformation',
+                          'alb-dns': alb_dns
+                      }
+                  )
+                  
+                  print("✅ config.json uploaded successfully")
+                  
+                  # Call PATCH API to mark demo app as complete
+                  demo_api_url = f"{demo_api_base_url}/demo-apps/{demo_app_id}/complete"
+                  print(f"🚀 Calling PATCH API: {demo_api_url}")
+                  
+                  api_response = http.request(
+                      'PATCH',
+                      demo_api_url,
+                      headers={
+                          'Content-Type': 'application/json'
+                      },
+                      body=json.dumps({
+                          'status': 'completed',
+                          'backendUrl': backend_url,
+                          'timestamp': datetime.utcnow().isoformat() + "Z"
+                      })
+                  )
+                  
+                  print(f"✅ API Response: {api_response.status} - {api_response.data.decode('utf-8')}")
+                  
+                  if api_response.status not in [200, 201, 204]:
+                      print(f"⚠️ Warning: API returned non-success status: {api_response.status}")
+                      # Don't fail the stack for API errors - just log it
+                  
+                  result_data = {
+                      'BackendUrl': backend_url,
+                      'ConfigUploaded': f's3://{s3_bucket}/config.json',
+                      'DemoApiCalled': demo_api_url,
+                      'ApiStatus': str(api_response.status)
+                  }
+                  
+                  send_response(event, context, 'SUCCESS', result_data)
+                  
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps(result_data)
+                  }
+                  
+              except Exception as e:
+                  print(f"❌ Error: {str(e)}")
+                  import traceback
+                  traceback.print_exc()
+                  send_response(event, context, 'FAILED', {'Error': str(e)})
+                  raise
+
   OpenSearchRoleMappingCustomResource:
     Type: Custom::OpenSearchRoleMapping
     DependsOn:
@@ -1613,6 +1823,22 @@ Resources:
           - !GetAtt SearchSimilarVideosTaskRole.Arn
           - !GetAtt ECSTaskRole.Arn
           - !Sub 'arn:aws:iam::${AccountId}:root'
+
+  # ============ NEW CUSTOM RESOURCE FOR FRONTEND CONFIG UPDATE ============
+  UpdateFrontendConfigCustomResource:
+    Type: Custom::UpdateFrontendConfig
+    DependsOn:
+      - ECSService
+      - ApplicationLoadBalancer
+      - UpdateFrontendConfigLambda
+    Properties:
+      ServiceToken: !GetAtt UpdateFrontendConfigLambda.Arn
+      StackName: !Ref AWS::StackName
+      FrontendBucket: !Ref FrontendS3Bucket
+      DemoApiBaseUrl: !Ref DemoApiBaseUrl
+      DemoAppId: !Ref DemoAppId
+      ALBDNSName: !GetAtt ApplicationLoadBalancer.DNSName
+      Trigger: !Sub '${AWS::StackName}-${ApplicationLoadBalancer}'
 
   InvokeBedrockMarengoInvokePermission:
     Type: AWS::Lambda::Permission
@@ -2047,3 +2273,14 @@ Outputs:
     Value: !Sub 'https://${OpenSearchDomain.DomainEndpoint}/_dashboards'
     Export:
       Name: !Sub '${AWS::StackName}-OpenSearchDashboardURL'
+
+  # ============ NEW OUTPUTS FOR FRONTEND CONFIG AUTOMATION ============
+  FrontendConfigUrl:
+    Description: Frontend config.json URL in S3
+    Value: !Sub 'https://${FrontendS3Bucket}.s3.amazonaws.com/config.json'
+
+  UpdateFrontendConfigLambdaArn:
+    Description: Lambda function that updates frontend config and calls completion API
+    Value: !GetAtt UpdateFrontendConfigLambda.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-UpdateFrontendConfigLambdaArn'
