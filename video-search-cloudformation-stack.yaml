@@ -26,19 +26,11 @@ Parameters:
   Region:
     Type: String
     Default: 'us-east-1'
-  # ============ NEW PARAMETERS FOR FRONTEND CONFIG AUTOMATION ============
+  # ============ FRONTEND CONFIGURATION PARAMETER ============
   FrontendS3Bucket:
     Type: String
     Default: 'condenast-fe'
     Description: S3 bucket where frontend static site is hosted
-  DemoApiBaseUrl:
-    Type: String
-    Default: 'your-api-base-url'
-    Description: Base URL for demo apps management API
-  DemoAppId:
-    Type: String
-    Default: 'your-id'
-    Description: Demo application ID for completion callback
 
 Resources:
   ECSTaskExecutionRole:
@@ -694,8 +686,8 @@ Resources:
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
+          FromPort: 8000
+          ToPort: 8000
           CidrIp: 0.0.0.0/0
         - IpProtocol: tcp
           FromPort: 443
@@ -1057,7 +1049,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn: !Ref ApplicationLoadBalancer
-      Port: 80
+      Port: 8000
       Protocol: HTTP
       DefaultActions:
         - Type: forward
@@ -1379,6 +1371,162 @@ Resources:
                       raise
               return {'statusCode': 200, 'body': json.dumps('Step Functions triggered successfully')}
 
+  # ============ S3 BUCKET IMPORT AND EVENT NOTIFICATION ============
+  LandingZoneBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    DependsOn:
+      - InvokeStepFunctionPermissionFromS3  # ← ADD THIS
+    Properties:
+      BucketName: !Sub '${StackPrefix}-landingzone-useast1-943143228843-bucket'
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt InvokeStepFunctionFunction.Arn
+
+  # ============ S3 BUCKET AUTO-DELETION RESOURCES ============
+  EmptyBucketLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${StackPrefix}-empty-bucket-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3BucketEmptyAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                Resource: !Sub 'arn:aws:s3:::${StackPrefix}-landingzone-useast1-943143228843-bucket'
+              - Effect: Allow
+                Action:
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource: !Sub 'arn:aws:s3:::${StackPrefix}-landingzone-useast1-943143228843-bucket/*'
+
+  EmptyBucketFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${StackPrefix}-empty-bucket'
+      Runtime: python3.13
+      Handler: index.lambda_handler
+      Timeout: 900
+      MemorySize: 256
+      Role: !GetAtt EmptyBucketLambdaRole.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+          import cfnresponse
+          import logging
+          
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          
+          s3 = boto3.client('s3')
+          
+          def lambda_handler(event, context):
+              """Empty S3 bucket on CloudFormation Delete event"""
+              logger.info(f"Event: {json.dumps(event)}")
+              
+              try:
+                  bucket_name = event['ResourceProperties']['BucketName']
+                  request_type = event['RequestType']
+                  
+                  if request_type == 'Delete':
+                      logger.info(f"Emptying bucket: {bucket_name}")
+                      empty_bucket(bucket_name)
+                      logger.info(f"Successfully emptied bucket: {bucket_name}")
+                  else:
+                      logger.info(f"Request type {request_type} - no action needed")
+                  
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+                  
+              except Exception as e:
+                  logger.error(f"Error: {str(e)}")
+                  import traceback
+                  traceback.print_exc()
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+          
+          def empty_bucket(bucket_name):
+              """Delete all objects and versions from the bucket"""
+              try:
+                  # Delete all object versions and delete markers
+                  paginator = s3.get_paginator('list_object_versions')
+                  page_iterator = paginator.paginate(Bucket=bucket_name)
+                  
+                  for page in page_iterator:
+                      objects_to_delete = []
+                      
+                      # Add all versions
+                      if 'Versions' in page:
+                          for version in page['Versions']:
+                              objects_to_delete.append({
+                                  'Key': version['Key'],
+                                  'VersionId': version['VersionId']
+                              })
+                      
+                      # Add all delete markers
+                      if 'DeleteMarkers' in page:
+                          for delete_marker in page['DeleteMarkers']:
+                              objects_to_delete.append({
+                                  'Key': delete_marker['Key'],
+                                  'VersionId': delete_marker['VersionId']
+                              })
+                      
+                      # Delete objects in batches
+                      if objects_to_delete:
+                          logger.info(f"Deleting {len(objects_to_delete)} objects/versions")
+                          s3.delete_objects(
+                              Bucket=bucket_name,
+                              Delete={'Objects': objects_to_delete}
+                          )
+                  
+                  # Also delete any remaining objects (for non-versioned buckets)
+                  paginator = s3.get_paginator('list_objects_v2')
+                  page_iterator = paginator.paginate(Bucket=bucket_name)
+                  
+                  for page in page_iterator:
+                      if 'Contents' in page:
+                          objects_to_delete = [{'Key': obj['Key']} for obj in page['Contents']]
+                          if objects_to_delete:
+                              logger.info(f"Deleting {len(objects_to_delete)} remaining objects")
+                              s3.delete_objects(
+                                  Bucket=bucket_name,
+                                  Delete={'Objects': objects_to_delete}
+                              )
+                  
+                  logger.info(f"Bucket {bucket_name} emptied successfully")
+                  
+              except Exception as e:
+                  logger.error(f"Error emptying bucket {bucket_name}: {str(e)}")
+                  raise
+
+  EmptyBucketOnDelete:
+    Type: Custom::EmptyBucket
+    Properties:
+      ServiceToken: !GetAtt EmptyBucketFunction.Arn
+      BucketName: !Ref LandingZoneBucket
+
+  InvokeStepFunctionPermissionFromS3:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt InvokeStepFunctionFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${StackPrefix}-landingzone-useast1-943143228843-bucket'
+      SourceAccount: !Ref AWS::AccountId
+
   CreateSnapshotFunction:
     Type: AWS::Lambda::Function
     DependsOn:
@@ -1640,6 +1788,75 @@ Resources:
                   traceback.print_exc()
                   send_response(event, context, 'FAILED', {'Error': str(e)})
 
+  # ============ CLOUDFRONT RESOURCES ============
+  FrontendOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub '${StackPrefix}-frontend-oac'
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        HttpVersion: http2
+        IPV6Enabled: true
+        DefaultCacheBehavior:
+          TargetOriginId: FrontendS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6 # AWS "CachingOptimized"
+        Origins:
+          - Id: FrontendS3Origin
+            DomainName: !Sub '${FrontendS3Bucket}.s3.${AWS::Region}.${AWS::URLSuffix}'
+            OriginAccessControlId: !GetAtt FrontendOAC.Id
+            OriginPath: ""
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendS3Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontReadFromThisDistribution
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub 'arn:aws:s3:::${FrontendS3Bucket}/*'
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub 'arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution}'
+
+  ApiDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn: ApplicationLoadBalancer
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        HttpVersion: http2
+        IPV6Enabled: true
+        DefaultCacheBehavior:
+          TargetOriginId: ApiOrigin
+          ViewerProtocolPolicy: https-only
+          AllowedMethods: [GET, HEAD, OPTIONS, PUT, POST, PATCH, DELETE]
+          CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
+          OriginRequestPolicyId: 216adef6-5c7f-47e4-b989-5492eafa07d3
+        Origins:
+          - Id: ApiOrigin
+            DomainName: !GetAtt ApplicationLoadBalancer.DNSName
+            CustomOriginConfig:
+              OriginProtocolPolicy: http-only
+              HTTPPort: 8000
+              HTTPSPort: 443
+
   # ============ NEW LAMBDA FUNCTION FOR FRONTEND CONFIG UPDATE ============
   UpdateFrontendConfigLambda:
     Type: AWS::Lambda::Function
@@ -1655,10 +1872,7 @@ Resources:
       Role: !GetAtt UpdateFrontendConfigLambdaRole.Arn
       Environment:
         Variables:
-          STACK_NAME: !Ref AWS::StackName
           FRONTEND_S3_BUCKET: !Ref FrontendS3Bucket
-          DEMO_API_BASE_URL: !Ref DemoApiBaseUrl
-          DEMO_APP_ID: !Ref DemoAppId
       Code:
         ZipFile: |
           import json
@@ -1695,6 +1909,12 @@ Resources:
               """Update frontend config.json and call demo completion API"""
               print(f"Event: {json.dumps(event)}")
               
+              # Initialize result data with defaults
+              result_data = {
+                  'BackendUrl': None,
+                  'ConfigUploaded': None
+              }
+              
               try:
                   if event['RequestType'] == 'Delete':
                       print("Delete request - no action needed")
@@ -1703,18 +1923,20 @@ Resources:
                   
                   # Get values from custom resource properties
                   resource_properties = event.get('ResourceProperties', {})
-                  alb_dns = resource_properties.get('ALBDNSName')
+                  api_base_url = resource_properties.get('ApiBaseUrl')
                   
-                  if not alb_dns:
-                      raise ValueError("ALBDNSName not provided in custom resource properties")
+                  if not api_base_url:
+                      error_msg = "ApiBaseUrl not provided in custom resource properties"
+                      print(f"❌ Critical Error: {error_msg}")
+                      send_response(event, context, 'FAILED', {'Error': error_msg})
+                      return
                   
-                  s3_bucket = os.environ['FRONTEND_S3_BUCKET']
-                  demo_api_base_url = os.environ['DEMO_API_BASE_URL']
-                  demo_app_id = os.environ['DEMO_APP_ID']
+                  s3_bucket = os.environ.get('FRONTEND_S3_BUCKET')
                   
-                  backend_url = f"http://{alb_dns}"
-                  print(f"✅ Backend URL: {backend_url}")
-                  print(f"✅ ALB DNS from custom resource properties: {alb_dns}")
+                  backend_url = api_base_url.rstrip("/")
+                  result_data['BackendUrl'] = backend_url
+                  
+                  print(f"✅ Backend URL (API CloudFront): {backend_url}")
                   
                   # Create config.json
                   config = {
@@ -1742,54 +1964,37 @@ Resources:
                   
                   print(f"📄 Config created: {json.dumps(config, indent=2)}")
                   
-                  # Upload to S3
-                  print(f"📤 Uploading config.json to s3://{s3_bucket}/config.json")
-                  s3.put_object(
-                      Bucket=s3_bucket,
-                      Key='config.json',
-                      Body=json.dumps(config, indent=2),
-                      ContentType='application/json',
-                      ContentDisposition='inline',              # ← NEW LINE
-                      CacheControl='no-cache, no-store, must-revalidate',
-                      ACL='public-read',                        # ← NEW LINE (MAKES IT PUBLIC!)
-                      Metadata={
-                          'updated-by': 'cloudformation',
-                          'alb-dns': alb_dns
-                      }
-                  )
+                  # Upload to S3 with error handling
+                  if s3_bucket:
+                      try:
+                          print(f"📤 Uploading config.json to s3://{s3_bucket}/config.json")
+                          s3.put_object(
+                              Bucket=s3_bucket,
+                              Key='config.json',
+                              Body=json.dumps(config, indent=2),
+                              ContentType='application/json',
+                              ContentDisposition='inline',
+                              CacheControl='no-cache, no-store, must-revalidate',
+                              Metadata={
+                                  'updated-by': 'cloudformation',
+                                  'backend-url': backend_url
+                              }
+                          )
+                          
+                          print("✅ config.json uploaded successfully")
+                          result_data['ConfigUploaded'] = f's3://{s3_bucket}/config.json'
+                          result_data['S3UploadSuccess'] = True
+                          
+                      except Exception as s3_error:
+                          error_msg = f"S3 upload failed: {str(s3_error)}"
+                          print(f"❌ {error_msg}")
+                          # Continue execution - don't fail the stack for S3 errors
+                  else:
+                      error_msg = "FRONTEND_S3_BUCKET environment variable not set"
+                      print(f"⚠️ Warning: {error_msg}")
                   
-                  print("✅ config.json uploaded successfully")
-                  
-                  # Call PATCH API to mark demo app as complete
-                  demo_api_url = f"{demo_api_base_url}/demo-apps/{demo_app_id}/complete"
-                  print(f"🚀 Calling PATCH API: {demo_api_url}")
-                  
-                  api_response = http.request(
-                      'PATCH',
-                      demo_api_url,
-                      headers={
-                          'Content-Type': 'application/json'
-                      },
-                      body=json.dumps({
-                          'status': 'completed',
-                          'backendUrl': backend_url,
-                          'timestamp': datetime.utcnow().isoformat() + "Z"
-                      })
-                  )
-                  
-                  print(f"✅ API Response: {api_response.status} - {api_response.data.decode('utf-8')}")
-                  
-                  if api_response.status not in [200, 201, 204]:
-                      print(f"⚠️ Warning: API returned non-success status: {api_response.status}")
-                      # Don't fail the stack for API errors - just log it
-                  
-                  result_data = {
-                      'BackendUrl': backend_url,
-                      'ConfigUploaded': f's3://{s3_bucket}/config.json',
-                      'DemoApiCalled': demo_api_url,
-                      'ApiStatus': str(api_response.status)
-                  }
-                  
+                  # Send SUCCESS response to CloudFormation
+                  print(f"📊 Final result: {json.dumps(result_data, indent=2)}")
                   send_response(event, context, 'SUCCESS', result_data)
                   
                   return {
@@ -1798,11 +2003,17 @@ Resources:
                   }
                   
               except Exception as e:
-                  print(f"❌ Error: {str(e)}")
+                  error_msg = f"Critical error in lambda execution: {str(e)}"
+                  print(f"❌ {error_msg}")
                   import traceback
                   traceback.print_exc()
-                  send_response(event, context, 'FAILED', {'Error': str(e)})
-                  raise
+                  
+                  send_response(event, context, 'FAILED', {'Error': error_msg})
+                  
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'Error': error_msg})
+                  }
 
   OpenSearchRoleMappingCustomResource:
     Type: Custom::OpenSearchRoleMapping
@@ -1831,13 +2042,11 @@ Resources:
       - ECSService
       - ApplicationLoadBalancer
       - UpdateFrontendConfigLambda
+      - ApiDistribution
     Properties:
       ServiceToken: !GetAtt UpdateFrontendConfigLambda.Arn
-      StackName: !Ref AWS::StackName
       FrontendBucket: !Ref FrontendS3Bucket
-      DemoApiBaseUrl: !Ref DemoApiBaseUrl
-      DemoAppId: !Ref DemoAppId
-      ALBDNSName: !GetAtt ApplicationLoadBalancer.DNSName
+      ApiBaseUrl: !Sub 'https://${ApiDistribution.DomainName}'
       Trigger: !Sub '${AWS::StackName}-${ApplicationLoadBalancer}'
 
   InvokeBedrockMarengoInvokePermission:
@@ -2008,279 +2217,8 @@ Resources:
         }
         
 Outputs:
-  VPCId:
-    Description: VPC ID
-    Value: !Ref VPC
+  CloudFrontURL:
+    Description: CloudFront URL for the frontend
+    Value: !GetAtt FrontendDistribution.DomainName
     Export:
-      Name: !Sub '${AWS::StackName}-VPCId'
-
-  PublicSubnet1Id:
-    Description: Public Subnet 1 ID
-    Value: !Ref PublicSubnet1
-    Export:
-      Name: !Sub '${AWS::StackName}-PublicSubnet1Id'
-
-  PublicSubnet2Id:
-    Description: Public Subnet 2 ID
-    Value: !Ref PublicSubnet2
-    Export:
-      Name: !Sub '${AWS::StackName}-PublicSubnet2Id'
-
-  PrivateSubnet1Id:
-    Description: Private Subnet 1 ID
-    Value: !Ref PrivateSubnet1
-    Export:
-      Name: !Sub '${AWS::StackName}-PrivateSubnet1Id'
-
-  PrivateSubnet2Id:
-    Description: Private Subnet 2 ID
-    Value: !Ref PrivateSubnet2
-    Export:
-      Name: !Sub '${AWS::StackName}-PrivateSubnet2Id'
-
-  ALBSecurityGroupId:
-    Description: ALB Security Group ID
-    Value: !Ref ALBSecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-ALBSecurityGroupId'
-
-  ECSSecurityGroupId:
-    Description: ECS Security Group ID
-    Value: !Ref ECSSecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-ECSSecurityGroupId'
-
-
-
-  LambdaSecurityGroupId:
-    Description: Lambda Security Group ID
-    Value: !Ref LambdaSecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-LambdaSecurityGroupId'
-
-  VPCEndpointSecurityGroupId:
-    Description: VPC Endpoint Security Group ID
-    Value: !Ref VPCEndpointSecurityGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-VPCEndpointSecurityGroupId'
-
-  ECSClusterArn:
-    Description: ECS Cluster ARN
-    Value: !GetAtt ECSCluster.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-ECSClusterArn'
-
-  VideoPreprocessingTaskDefinitionArn:
-    Description: Video Preprocessing Task Definition ARN
-    Value: !Ref VideoPreprocessingTaskDefinition
-    Export:
-      Name: !Sub '${AWS::StackName}-VideoPreprocessingTaskDefinitionArn'
-
-  SearchSimilarVideosTaskDefinitionArn:
-    Description: Search Similar Videos Task Definition ARN
-    Value: !Ref SearchSimilarVideosTaskDefinition
-    Export:
-      Name: !Sub '${AWS::StackName}-SearchSimilarVideosTaskDefinitionArn'
-
-  ALBDNSName:
-    Description: Application Load Balancer DNS Name
-    Value: !GetAtt ApplicationLoadBalancer.DNSName
-    Export:
-      Name: !Sub '${AWS::StackName}-ALBDNSName'
-
-  TargetGroupArn:
-    Description: Target Group ARN
-    Value: !Ref TargetGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-TargetGroupArn'
-
-  InvokeBedrockMarengoFunctionArn:
-    Description: Invoke Bedrock Marengo Lambda Function ARN
-    Value: !GetAtt InvokeBedrockMarengoFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-InvokeBedrockMarengoFunctionArn'
-
-  StoreEmbeddingsFunctionArn:
-    Description: Store Embeddings Lambda Function ARN
-    Value: !GetAtt StoreEmbeddingsFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-StoreEmbeddingsFunctionArn'
-
-  InvokeStepFunctionFunctionArn:
-    Description: Invoke Step Function Lambda Function ARN
-    Value: !GetAtt InvokeStepFunctionFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-InvokeStepFunctionFunctionArn'
-
-  CreateSnapshotFunctionArn:
-    Description: Create Snapshot Lambda Function ARN
-    Value: !GetAtt CreateSnapshotFunction.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-CreateSnapshotFunctionArn'
-
-  OpenSearchDomainEndpoint:
-    Description: OpenSearch Domain Endpoint
-    Value: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchDomainEndpoint'
-
-  OpenSearchDomainArn:
-    Description: OpenSearch Domain ARN
-    Value: !GetAtt OpenSearchDomain.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchDomainArn'
-
-  VideoProcessingStateMachineArn:
-    Description: Video Processing State Machine ARN
-    Value: !Ref VideoProcessingStateMachine
-    Export:
-      Name: !Sub '${AWS::StackName}-VideoProcessingStateMachineArn'
-
-  ECSServiceName:
-    Description: ECS Service Name
-    Value: !GetAtt ECSService.Name
-    Export:
-      Name: !Sub '${AWS::StackName}-ECSServiceName'
-
-  OpenSearchRoleMappingLambdaArn:
-    Description: OpenSearch Role Mapping Lambda Function ARN
-    Value: !GetAtt OpenSearchRoleMappingLambda.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchRoleMappingLambdaArn'
-
-  OpenSearchAdminRoleArn:
-    Description: OpenSearch Admin IAM Role ARN
-    Value: !GetAtt OpenSearchAdminRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchAdminRoleArn'
-
-  ECSTaskExecutionRoleArn:
-    Description: ECS Task Execution Role ARN
-    Value: !GetAtt ECSTaskExecutionRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-ECSTaskExecutionRoleArn'
-
-  ECSTaskRoleArn:
-    Description: ECS Task Role ARN
-    Value: !GetAtt ECSTaskRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-ECSTaskRoleArn'
-
-  SearchSimilarVideosTaskRoleArn:
-    Description: Search Similar Videos ECS Task Role ARN
-    Value: !GetAtt SearchSimilarVideosTaskRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-SearchSimilarVideosTaskRoleArn'
-
-  InvokeBedrockMarengoRoleArn:
-    Description: Invoke Bedrock Marengo Lambda Role ARN
-    Value: !GetAtt InvokeBedrockMarengoRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-InvokeBedrockMarengoRoleArn'
-
-  InvokeVideoProcessingStepFunctionRoleArn:
-    Description: Invoke Video Processing Step Function Lambda Role ARN
-    Value: !GetAtt InvokeVideoProcessingStepFunctionRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-InvokeVideoProcessingStepFunctionRoleArn'
-
-  OpenSearchSnapshotRoleArn:
-    Description: OpenSearch Snapshot Role ARN
-    Value: !GetAtt OpenSearchSnapshotRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchSnapshotRoleArn'
-
-  CreateSnapshotLambdaRoleArn:
-    Description: Create Snapshot Lambda Role ARN
-    Value: !GetAtt CreateSnapshotLambdaRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-CreateSnapshotLambdaRoleArn'
-
-  StoreEmbeddingsLambdaRoleArn:
-    Description: Store Embeddings Lambda Role ARN
-    Value: !GetAtt StoreEmbeddingsLambdaRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-StoreEmbeddingsLambdaRoleArn'
-
-  StepFunctionsExecutionRoleArn:
-    Description: Step Functions Execution Role ARN
-    Value: !GetAtt StepFunctionsExecutionRole.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-StepFunctionsExecutionRoleArn'
-
-  OpenSearchDependenciesLayerArn:
-    Description: OpenSearch Dependencies Lambda Layer ARN
-    Value: !Ref OpenSearchDependenciesLayer
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchDependenciesLayerArn'
-
-  FfmpegVideoProcessingDependenciesLayerArn:
-    Description: FFmpeg Video Processing Dependencies Lambda Layer ARN
-    Value: !Ref FfmpegVideoProcessingDependenciesLayer
-    Export:
-      Name: !Sub '${AWS::StackName}-FfmpegVideoProcessingDependenciesLayerArn'
-
-  S3VPCEndpointId:
-    Description: S3 VPC Endpoint ID
-    Value: !Ref S3VPCEndpoint
-    Export:
-      Name: !Sub '${AWS::StackName}-S3VPCEndpointId'
-
-  ECRAPIVPCEndpointId:
-    Description: ECR API VPC Endpoint ID
-    Value: !Ref ECRAPIVPCEndpoint
-    Export:
-      Name: !Sub '${AWS::StackName}-ECRAPIVPCEndpointId'
-
-  ECRDKRVPCEndpointId:
-    Description: ECR DKR VPC Endpoint ID
-    Value: !Ref ECRDKRVPCEndpoint
-    Export:
-      Name: !Sub '${AWS::StackName}-ECRDKRVPCEndpointId'
-
-  BedrockVPCEndpointId:
-    Description: Bedrock VPC Endpoint ID
-    Value: !Ref BedrockVPCEndpoint
-    Export:
-      Name: !Sub '${AWS::StackName}-BedrockVPCEndpointId'
-
-  BedrockRuntimeVPCEndpointId:
-    Description: Bedrock Runtime VPC Endpoint ID
-    Value: !Ref BedrockRuntimeVPCEndpoint
-    Export:
-      Name: !Sub '${AWS::StackName}-BedrockRuntimeVPCEndpointId'
-
-  StepFunctionsVPCEndpointId:
-    Description: Step Functions VPC Endpoint ID
-    Value: !Ref StepFunctionsVPCEndpoint
-    Export:
-      Name: !Sub '${AWS::StackName}-StepFunctionsVPCEndpointId'
-
-  STSVPCEndpointId:
-    Description: STS VPC Endpoint ID
-    Value: !Ref STSVPCEndpoint
-    Export:
-      Name: !Sub '${AWS::StackName}-STSVPCEndpointId'
-
-  OpenSearchPublicEndpoint:
-    Description: Public OpenSearch domain endpoint
-    Value: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchPublicEndpoint'
-
-  OpenSearchDashboardURL:
-    Description: OpenSearch Dashboards (Kibana) URL
-    Value: !Sub 'https://${OpenSearchDomain.DomainEndpoint}/_dashboards'
-    Export:
-      Name: !Sub '${AWS::StackName}-OpenSearchDashboardURL'
-
-  # ============ NEW OUTPUTS FOR FRONTEND CONFIG AUTOMATION ============
-  FrontendConfigUrl:
-    Description: Frontend config.json URL in S3
-    Value: !Sub 'https://${FrontendS3Bucket}.s3.amazonaws.com/config.json'
-
-  UpdateFrontendConfigLambdaArn:
-    Description: Lambda function that updates frontend config and calls completion API
-    Value: !GetAtt UpdateFrontendConfigLambda.Arn
-    Export:
-      Name: !Sub '${AWS::StackName}-UpdateFrontendConfigLambdaArn'
+      Name: !Sub '${AWS::StackName}-FrontendCloudFrontDomainName'

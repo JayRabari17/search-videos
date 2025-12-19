@@ -23,12 +23,9 @@ logger = logging.getLogger(name=__name__)
 app = FastAPI(title="Video Search Service", version="1.0.0", docs_url=None, redoc_url=None, openapi_url=None, swagger_ui_oauth2_redirect_url= None)
 
 app.add_middleware(
-    middleware_class=CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://condenast-fe.s3-website-us-east-1.amazonaws.com",
-    ],
-    allow_credentials=True,
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
