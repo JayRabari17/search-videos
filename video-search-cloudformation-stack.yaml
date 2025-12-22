@@ -105,6 +105,11 @@ Resources:
                   - !Sub 
                     - 'arn:aws:s3:::${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
                     - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
         - PolicyName: StepFunctionsAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -235,6 +240,10 @@ Resources:
                   - !Sub 
                     - 'arn:aws:s3:::${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
                     - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource: !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
         - PolicyName: BedrockAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -419,6 +428,11 @@ Resources:
                   - !Sub 
                     - 'arn:aws:s3:::${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
                     - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
         - PolicyName: EC2NetworkInterface
           PolicyDocument:
             Version: '2012-10-17'
@@ -1139,6 +1153,7 @@ Resources:
           VIDEO_BUCKET: !Sub 
             - '${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
             - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
+          OUTPUT_BUCKET: !Sub 'processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
       VpcConfig:
         SubnetIds:
           - !Ref PrivateSubnet1
@@ -1244,6 +1259,7 @@ Resources:
       Environment:
         Variables:
           OPENSEARCH_CLUSTER_HOST: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
+          THUMBNAIL_BUCKET: !Sub 'processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
       VpcConfig:
         SubnetIds:
           - !Ref PrivateSubnet1
@@ -1347,6 +1363,30 @@ Resources:
                   - Name: suffix
                     Value: .mp4
 
+  # ============ OUTPUT VIDEO BUCKET (for processed videos and thumbnails) ============
+  OutputVideoBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub 'processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+              - DELETE
+              - HEAD
+            AllowedHeaders:
+              - '*'
+            ExposedHeaders:
+              - ETag
+              - x-amz-request-id
+              - x-amz-id-2
+            MaxAge: 3600
+
   # ============ S3 BUCKET AUTO-DELETION RESOURCES ============
   EmptyBucketLambdaRole:
     Type: AWS::IAM::Role
@@ -1370,16 +1410,20 @@ Resources:
                 Action:
                   - s3:ListBucket
                   - s3:ListBucketVersions
-                Resource: !Sub 
-                  - 'arn:aws:s3:::${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
-                  - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
+                Resource: 
+                  - !Sub 
+                    - 'arn:aws:s3:::${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
+                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
+                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
               - Effect: Allow
                 Action:
                   - s3:DeleteObject
                   - s3:DeleteObjectVersion
-                Resource: !Sub 
-                  - 'arn:aws:s3:::${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
-                  - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
+                Resource: 
+                  - !Sub 
+                    - 'arn:aws:s3:::${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
+                    - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
+                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
 
   EmptyBucketFunction:
     Type: AWS::Lambda::Function
@@ -1484,6 +1528,12 @@ Resources:
     Properties:
       ServiceToken: !GetAtt EmptyBucketFunction.Arn
       BucketName: !Ref VideoBucket
+
+  EmptyOutputBucketOnDelete:
+    Type: Custom::EmptyBucket
+    Properties:
+      ServiceToken: !GetAtt EmptyBucketFunction.Arn
+      BucketName: !Ref OutputVideoBucket
 
   InvokeStepFunctionPermissionFromS3:
     Type: AWS::Lambda::Permission
