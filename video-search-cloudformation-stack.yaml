@@ -111,8 +111,8 @@ Resources:
                   - s3:GetObject
                   - s3:ListBucket
                 Resource: 
-                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
-                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
+                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
         - PolicyName: StepFunctionsAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -189,8 +189,8 @@ Resources:
                   - !Sub 
                     - 'arn:aws:s3:::${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
                     - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
-                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
+                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
         - PolicyName: SSMMessagesAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -251,8 +251,8 @@ Resources:
                   - s3:PutObject
                   - s3:ListBucket
                 Resource: 
-                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
-                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
+                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
         - PolicyName: BedrockAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -346,7 +346,7 @@ Resources:
                 Effect: Allow
                 Resource:
                   - !Sub 
-                    - 'arn:aws:s3:::${env}-${FrontendBucket}-${AWS::AccountId}'
+                    - 'arn:aws:s3:::local-${FrontendBucket}-${AWS::AccountId}'
                     - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
               - Action:
                   - s3:GetObject
@@ -355,7 +355,7 @@ Resources:
                 Effect: Allow
                 Resource:
                   - !Sub 
-                    - 'arn:aws:s3:::${env}-${FrontendBucket}-${AWS::AccountId}/*'
+                    - 'arn:aws:s3:::local-${FrontendBucket}-${AWS::AccountId}/*'
                     - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
 
   CreateSnapshotLambdaRole:
@@ -445,8 +445,8 @@ Resources:
                   - s3:GetObject
                   - s3:ListBucket
                 Resource: 
-                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
-                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
+                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
         - PolicyName: EC2NetworkInterface
           PolicyDocument:
             Version: '2012-10-17'
@@ -579,14 +579,14 @@ Resources:
                   - s3:GetObject
                 Resource:
                   - !Sub 
-                    - 'arn:aws:s3:::${env}-${FrontendBucket}-${AWS::AccountId}/*'
+                    - 'arn:aws:s3:::local-${FrontendBucket}-${AWS::AccountId}/*'
                     - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
               - Effect: Allow
                 Action:
                   - s3:ListBucket
                 Resource:
                   - !Sub 
-                    - 'arn:aws:s3:::${env}-${FrontendBucket}-${AWS::AccountId}'
+                    - 'arn:aws:s3:::local-${FrontendBucket}-${AWS::AccountId}'
                     - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
   VPC:
     Type: AWS::EC2::VPC
@@ -1283,7 +1283,7 @@ Resources:
       Environment:
         Variables:
           AWS_BUCKET_OWNER: !Ref AWS::AccountId
-          OUTPUT_BUCKET: !Sub 'processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+          OUTPUT_BUCKET: !Sub '${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
       VpcConfig:
         SubnetIds:
           - !Ref PrivateSubnet1
@@ -1355,7 +1355,7 @@ Resources:
         - python3.13
       Content:
         S3Bucket: !Sub 
-          - '${env}-${FrontendBucket}-${AWS::AccountId}'
+          - 'local-${FrontendBucket}-${AWS::AccountId}'
           - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
         S3Key: demo-apps-assets/video-search-demo/lambda-artifacts/opensearch-query-dependencies-2fb22b80-caf2-4d3f-84a6-3f863bf3c409.zip
 
@@ -1367,7 +1367,7 @@ Resources:
         - python3.13
       Content:
         S3Bucket: !Sub 
-          - '${env}-${FrontendBucket}-${AWS::AccountId}'
+          - 'local-${FrontendBucket}-${AWS::AccountId}'
           - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
         S3Key: demo-apps-assets/video-search-demo/lambda-artifacts/ffmpeg-video-processing-dependencies-697fac5e-fb3f-4814-b610-f0d2d3812616.zip
 
@@ -1389,7 +1389,7 @@ Resources:
       Environment:
         Variables:
           OPENSEARCH_CLUSTER_HOST: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
-          THUMBNAIL_BUCKET: !Sub 'processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+          THUMBNAIL_BUCKET: !Sub '${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
       VpcConfig:
         SubnetIds:
           - !Ref PrivateSubnet1
@@ -1398,7 +1398,7 @@ Resources:
           - !Ref LambdaSecurityGroup
       Code:
         S3Bucket: !Sub 
-          - '${env}-${FrontendBucket}-${AWS::AccountId}'
+          - 'local-${FrontendBucket}-${AWS::AccountId}'
           - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
         S3Key: 'demo-apps-assets/video-search-demo/lambda-artifacts/store-embeddings-lambda.zip'
       EphemeralStorage:
@@ -1419,7 +1419,7 @@ Resources:
           VIDEO_BUCKET: !Sub 
             - '${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
             - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-          OUTPUT_BUCKET: !Sub 'processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+          OUTPUT_BUCKET: !Sub '${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
       Code:
         ZipFile: |
           import json
@@ -1499,7 +1499,7 @@ Resources:
     Type: AWS::S3::Bucket
     DeletionPolicy: Delete
     Properties:
-      BucketName: !Sub 'processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+      BucketName: !Sub '${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
       CorsConfiguration:
         CorsRules:
           - AllowedOrigins:
@@ -1533,7 +1533,7 @@ Resources:
             Action:
               - s3:GetBucketLocation
               - s3:ListBucket
-            Resource: !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+            Resource: !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
             Condition:
               StringEquals:
                 aws:SourceAccount: !Ref AWS::AccountId
@@ -1545,7 +1545,7 @@ Resources:
             Action:
               - s3:GetObject      # Bedrock reads the input video
               - s3:PutObject      # Bedrock writes embeddings
-            Resource: !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'  # ✅ ADD /*
+            Resource: !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'  # ✅ ADD /*
             Condition:
               StringEquals:
                 aws:SourceAccount: !Ref AWS::AccountId
@@ -1577,7 +1577,7 @@ Resources:
                   - !Sub 
                     - 'arn:aws:s3:::${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}'
                     - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
+                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}'
               - Effect: Allow
                 Action:
                   - s3:DeleteObject
@@ -1586,7 +1586,7 @@ Resources:
                   - !Sub 
                     - 'arn:aws:s3:::${VideoBucket}-${AWS::Region}-${AWS::AccountId}-${env}/*'
                     - VideoBucket: !FindInMap [BucketNames, Video, BaseName]
-                  - !Sub 'arn:aws:s3:::processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
+                  - !Sub 'arn:aws:s3:::${StackPrefix}-processed-videos-${AWS::Region}-${AWS::AccountId}-${env}/*'
 
   EmptyBucketFunction:
     Type: AWS::Lambda::Function
@@ -1726,7 +1726,7 @@ Resources:
           OPENSEARCH_CLUSTER_HOST: !Sub 'https://${OpenSearchDomain.DomainEndpoint}'
           SNAPSHOT_ROLE_ARN: !GetAtt OpenSearchSnapshotRole.Arn
           S3_BUCKET: !Sub 
-            - '${env}-${FrontendBucket}-${AWS::AccountId}'
+            - 'local-${FrontendBucket}-${AWS::AccountId}'
             - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
           REPO_NAME: !Sub '${StackPrefix}-${env}-snapshot-repo'
           
@@ -1998,7 +1998,7 @@ Resources:
         Origins:
           - Id: FrontendS3Origin
             DomainName: !Sub 
-              - '${env}-${FrontendBucket}-${AWS::AccountId}.s3.${AWS::Region}.${AWS::URLSuffix}'
+              - 'local-${FrontendBucket}-${AWS::AccountId}.s3.${AWS::Region}.${AWS::URLSuffix}'
               - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
             OriginAccessControlId: !GetAtt FrontendOAC.Id
             OriginPath: '/demo-apps-assets/video-search-demo/FE'
@@ -2030,7 +2030,7 @@ Resources:
                   - s3:GetBucketPolicy
                   - s3:DeleteBucketPolicy
                 Resource: !Sub 
-                  - 'arn:aws:s3:::${env}-${FrontendBucket}-${AWS::AccountId}'
+                  - 'arn:aws:s3:::local-${FrontendBucket}-${AWS::AccountId}'
                   - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
 
   # Lambda Function for managing bucket policy
@@ -2113,7 +2113,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt ManageBucketPolicyFunction.Arn
       BucketName: !Sub 
-        - '${env}-${FrontendBucket}-${AWS::AccountId}'
+        - 'local-${FrontendBucket}-${AWS::AccountId}'
         - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
       PolicyDocument:
         Version: '2012-10-17'
@@ -2124,7 +2124,7 @@ Resources:
               Service: cloudfront.amazonaws.com
             Action: s3:GetObject
             Resource: !Sub 
-              - 'arn:aws:s3:::${env}-${FrontendBucket}-${AWS::AccountId}/demo-apps-assets/video-search-demo/FE/*'
+              - 'arn:aws:s3:::local-${FrontendBucket}-${AWS::AccountId}/demo-apps-assets/video-search-demo/FE/*'
               - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
             Condition:
               StringEquals:
@@ -2168,7 +2168,7 @@ Resources:
       Environment:
         Variables:
           FRONTEND_S3_BUCKET: !Sub 
-            - '${env}-${FrontendBucket}-${AWS::AccountId}'
+            - 'local-${FrontendBucket}-${AWS::AccountId}'
             - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
       Code:
         ZipFile: |
@@ -2343,7 +2343,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt UpdateFrontendConfigLambda.Arn
       FrontendBucket: !Sub 
-        - '${env}-${FrontendBucket}-${AWS::AccountId}'
+        - 'local-${FrontendBucket}-${AWS::AccountId}'
         - FrontendBucket: !FindInMap [BucketNames, Frontend, BaseName]
       ApiBaseUrl: !Sub 'https://${ApiDistribution.DomainName}'
       Trigger: !Sub '${AWS::StackName}-${ApplicationLoadBalancer}'
